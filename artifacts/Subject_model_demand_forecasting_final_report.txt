@@ -1,0 +1,477 @@
+============================================================
+MLPILOT — DEMAND FORECASTING SUBJECT MODEL
+FINAL EXPERIMENT SUMMARY
+============================================================
+
+1. PROBLEM DEFINITION
+------------------------------------------------------------
+
+Objective:
+
+Predict the number of items customers will demand on the
+next day using historical retail transaction data.
+
+The model forecasts daily product demand based on:
+
+- Calendar patterns
+- Recent demand
+- Historical demand trends
+
+
+2. DATASET
+------------------------------------------------------------
+
+Dataset:
+
+Retail transaction dataset processed through PrepWise and
+additional subject-model-specific validation.
+
+Final cleaned transaction dataset:
+
+Rows: 514,912
+Columns: 10
+
+Columns:
+
+invoice
+stockcode
+description
+quantity
+invoicedate
+price
+customer_id
+country
+is_cancelled
+revenue
+
+Date range:
+
+2009-12-01 to 2010-12-09
+
+
+3. DATA CLEANING
+------------------------------------------------------------
+
+The following steps were performed:
+
+✓ Negative-price records removed
+✓ Zero-price records removed
+✓ Missing descriptions removed
+✓ Missing customer IDs replaced with "Unknown"
+✓ Duplicate rows checked
+✓ Data types validated
+✓ Invoice dates converted to datetime
+✓ Cancellation flag created
+✓ Revenue feature created
+✓ Extreme quantities investigated
+✓ Legitimate returns/cancellations retained in the
+  transaction dataset
+
+Final dataset status:
+
+Missing values: 0
+Duplicate rows: 0
+
+
+4. DEMAND TARGET DEFINITION
+------------------------------------------------------------
+
+Target:
+
+daily_demand
+
+Definition:
+
+Daily demand is calculated as the total quantity from
+positive-quantity transactions aggregated by calendar date.
+
+Negative quantities represent returns/cancellations and
+are excluded from the demand forecasting target.
+
+Formula:
+
+daily_demand =
+SUM(quantity WHERE quantity > 0)
+
+Returns and cancellations remain in the cleaned transaction
+dataset but are not included in the forecasting target.
+
+
+5. TIME SERIES CONSTRUCTION
+------------------------------------------------------------
+
+The positive transaction quantities were aggregated by date.
+
+A complete daily calendar was created.
+
+Date range:
+
+2009-12-01 to 2010-12-09
+
+Total calendar days: 374
+
+Missing transaction dates: 67
+
+Dates with no transactions were assigned:
+
+daily_demand = 0
+
+Final demand time-series shape:
+
+374 rows × 2 columns
+
+Columns:
+
+date
+daily_demand
+
+
+6. EXPLORATORY DATA ANALYSIS
+------------------------------------------------------------
+
+Demand patterns were investigated using:
+
+✓ Daily demand distribution
+✓ Missing calendar dates
+✓ Weekday demand patterns
+✓ Monthly demand patterns
+✓ Demand outliers
+✓ Large transaction investigation
+✓ Cancellation/return investigation
+✓ Autocorrelation analysis
+
+
+Important findings:
+
+- Saturday had very low/zero demand.
+- Weekday strongly influenced demand.
+- Demand contained several large positive spikes.
+- Large spikes were caused by bulk orders.
+- Demand distribution was positively skewed.
+- Sudden spikes were difficult to predict.
+- Returns/cancellations could significantly distort
+  net quantity calculations.
+
+Autocorrelation results:
+
+Lag 1:   0.2143
+Lag 7:   0.3005
+Lag 14:  0.3134
+
+
+7. FEATURE ENGINEERING
+------------------------------------------------------------
+
+Calendar Features:
+
+- day_of_week
+- month
+- day_of_month
+- week_of_year
+
+
+Historical Features:
+
+- lag_1
+- lag_7
+- lag_14
+- rolling_mean_7
+- rolling_mean_14
+
+
+Total Features: 9
+
+
+8. TRAIN / TEST SPLIT
+------------------------------------------------------------
+
+Chronological splitting was used.
+
+Random shuffling was not performed.
+
+Training samples: 288
+Testing samples: 72
+
+
+Training period:
+
+2009-12-15 to 2010-09-28
+
+
+Testing period:
+
+2010-09-29 to 2010-12-09
+
+
+9. BASELINE MODELS
+------------------------------------------------------------
+
+Naive Baseline:
+
+MAE:  11,690.22
+RMSE: 14,932.73
+
+
+Lag-7 Seasonal Baseline:
+
+MAE:  8,044.19
+RMSE: 15,901.73
+
+
+10. MACHINE LEARNING MODELS TESTED
+------------------------------------------------------------
+
+Random Forest (Initial):
+
+MAE:  7,713.01
+RMSE: 10,365.14
+
+
+XGBoost:
+
+MAE:  10,059.94
+RMSE: 13,769.41
+
+
+Gradient Boosting:
+
+MAE:  9,125.60
+RMSE: 13,073.20
+
+
+11. HYPERPARAMETER TUNING
+------------------------------------------------------------
+
+Algorithm:
+
+Random Forest Regressor
+
+
+Method:
+
+RandomizedSearchCV
+
+
+Cross Validation:
+
+TimeSeriesSplit
+
+Number of folds: 5
+
+
+Best Parameters:
+
+n_estimators: 300
+
+max_depth: 5
+
+min_samples_split: 5
+
+min_samples_leaf: 3
+
+max_features: 1.0
+
+
+Best Cross-Validation MAE:
+
+5,891.65
+
+
+12. FINAL MODEL
+------------------------------------------------------------
+
+Algorithm:
+
+Tuned Random Forest Regressor
+
+
+Final Test Results:
+
+MAE:  7,286.39
+
+RMSE: 9,947.92
+
+
+The final model achieved the best overall performance
+among the tested machine learning models.
+
+
+13. ERROR ANALYSIS
+------------------------------------------------------------
+
+The model performed reasonably well during normal demand
+periods.
+
+The largest prediction errors occurred during:
+
+- Sudden demand spikes
+- Unexpected bulk orders
+- Rapid changes in demand
+
+
+Potential factors unavailable in the dataset:
+
+- Promotions
+- Marketing campaigns
+- Holidays
+- Customer-specific bulk purchases
+- External business events
+
+
+These factors could explain sudden demand changes that
+cannot be inferred from historical demand alone.
+
+
+14. FEATURE IMPORTANCE
+------------------------------------------------------------
+
+Feature importance:
+
+day_of_week        0.384150
+
+lag_1              0.176215
+
+lag_14             0.114776
+
+rolling_mean_7     0.095808
+
+lag_7              0.070316
+
+day_of_month       0.057388
+
+week_of_year       0.050460
+
+rolling_mean_14    0.043116
+
+month              0.007770
+
+
+Most important feature:
+
+day_of_week
+
+
+15. FEATURE ABLATION EXPERIMENT
+------------------------------------------------------------
+
+A reduced feature model was tested by removing
+low-importance features.
+
+Full Feature Model:
+
+Features: 9
+
+MAE:  7,286.39
+RMSE: 9,947.92
+
+
+Reduced Feature Model:
+
+Features: 6
+
+MAE:  7,824.75
+RMSE: 10,674.37
+
+
+Conclusion:
+
+Removing low-importance features reduced model
+performance.
+
+Therefore, all 9 features were retained.
+
+
+16. FINAL MODEL SELECTION
+------------------------------------------------------------
+
+Models tested:
+
+Naive Baseline
+
+Lag-7 Seasonal Baseline
+
+Random Forest
+
+XGBoost
+
+Gradient Boosting
+
+
+Selected Model:
+
+Tuned Random Forest Regressor
+
+
+Reason:
+
+It achieved the lowest overall test error among the
+tested models.
+
+
+Final Performance:
+
+MAE:  7,286.39
+
+RMSE: 9,947.92
+
+
+17. FINAL CONCLUSION
+------------------------------------------------------------
+
+The demand forecasting subject model successfully predicts
+daily customer demand using historical retail transaction
+data.
+
+The experiment demonstrated a complete machine learning
+workflow:
+
+Data Cleaning
+        ↓
+Target Definition
+        ↓
+Time-Series Construction
+        ↓
+EDA
+        ↓
+Feature Engineering
+        ↓
+Baseline Models
+        ↓
+Machine Learning Models
+        ↓
+Hyperparameter Tuning
+        ↓
+Error Analysis
+        ↓
+Feature Importance
+        ↓
+Feature Ablation
+        ↓
+Final Model Selection
+
+
+Final Model:
+
+Tuned Random Forest Regressor
+
+
+Target:
+
+Daily Positive Demand
+
+
+Final MAE:
+
+7,286.39
+
+
+Final RMSE:
+
+9,947.92
+
+
+STATUS:
+
+✓ SUBJECT MODEL EXPERIMENT COMPLETE
+
+============================================================
