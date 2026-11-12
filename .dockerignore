@@ -1,0 +1,30 @@
+# Python environments and cache
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Git and secrets
+.git/
+.env
+.env.*
+
+# Local development files
+.ipynb_checkpoints/
+notebooks/
+tests/
+*.log
+
+# Local MLflow tracking data
+mlruns/
+mlflow.db
+mlflow.db-shm
+mlflow.db-wal
+
+# Local datasets and generated artifacts
+data/*.csv
+artifacts/*.joblib
+artifacts/remediation_history.jsonl

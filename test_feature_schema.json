@@ -1,0 +1,1 @@
+{"schema_version": 1, "feature_names": ["lag_1", "rolling_mean_7"], "target": "daily_demand", "rolling_windows": {"rolling_mean_7": 7}}

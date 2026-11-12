@@ -1,27 +1,38 @@
+
 # Python
 __pycache__/
 *.py[cod]
-
-# Jupyter
-.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
 
 # Virtual environments
 venv/
 .venv/
 env/
 
-# Environment variables
+# Environment variables and secrets
 .env
+.env.*
+!.env.example
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# MLflow
+# MLflow local tracking
 mlruns/
+mlflow.db
+mlflow.db-shm
+mlflow.db-wal
 
 # Logs
 *.log
 
 # Dataset files
 data/*.csv
+
+# Generated runtime history
+artifacts/remediation_history.jsonl
+artifacts/*.joblib
