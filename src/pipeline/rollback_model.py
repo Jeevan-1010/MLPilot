@@ -1,13 +1,15 @@
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from src.tracking.mlflow_config import configure_mlflow
 
 MODEL_NAME = "MLPilot-Demand-Forecasting"
 PRODUCTION_ALIAS = "production"
 
 
 def rollback_model(target_version):
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    
+    configure_mlflow()
     client = MlflowClient()
 
     print("\nStarting Model Rollback...")

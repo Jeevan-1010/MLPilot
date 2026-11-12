@@ -1,14 +1,14 @@
 
 import mlflow
 import mlflow.sklearn
-
+from src.tracking.mlflow_config import configure_mlflow
 
 MODEL_NAME = "MLPilot-Demand-Forecasting"
 EXPERIMENT_NAME = "MLPilot-Demand-Forecasting"
 
 
 def start_tracking():
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    configure_mlflow()
     mlflow.set_experiment(EXPERIMENT_NAME)
 
 

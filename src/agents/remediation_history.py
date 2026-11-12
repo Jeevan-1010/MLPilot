@@ -1,15 +1,16 @@
+import hashlib
 import json
-from pathlib import Path
 from datetime import datetime, timezone
 
+import psycopg
+from psycopg.types.json import Jsonb
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-HISTORY_PATH = BASE_DIR / "artifacts" / "remediation_history.jsonl"
+from src.tracking.mlflow_config import configure_mlflow
 
 
 def save_remediation_record(state: dict) -> dict:
     """
-    Persist one remediation execution as an append-only JSONL record.
+    Persist remediation execution history in Neon PostgreSQL.
     """
 
     result = state.get("retraining_result", {})
@@ -33,9 +34,28 @@ def save_remediation_record(state: dict) -> dict:
         },
     }
 
-    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    record_hash = hashlib.sha256(
+        json.dumps(
+            record,
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
 
-    with HISTORY_PATH.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(record, default=str) + "\n")
+    with psycopg.connect(configure_mlflow()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO mlpilot_remediation_history
+                    (timestamp, record, record_hash)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (record_hash) DO NOTHING
+                """,
+                (
+                    record["timestamp"],
+                    Jsonb(record),
+                    record_hash,
+                ),
+            )
 
     return record

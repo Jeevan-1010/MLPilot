@@ -1,14 +1,11 @@
-
-import json
-from pathlib import Path
+import psycopg
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.tracking.mlflow_config import configure_mlflow
+
 
 router = APIRouter()
-
-BASE_DIR = Path(__file__).resolve().parents[2]
-HISTORY_PATH = BASE_DIR / "artifacts" / "remediation_history.jsonl"
 
 
 @router.get("/admin/remediation-history")
@@ -16,48 +13,35 @@ def get_remediation_history(
     limit: int = Query(default=50, ge=1, le=200),
 ):
     """
-    Return the latest remediation history records.
+    Return the latest remediation history records from Neon.
     """
 
-    if not HISTORY_PATH.exists():
-        return {
-            "total_records": 0,
-            "returned_records": 0,
-            "records": [],
-        }
-
-    records = []
-
     try:
-        with HISTORY_PATH.open("r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                if not line.strip():
-                    continue
+        with psycopg.connect(configure_mlflow()) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*)
+                    FROM mlpilot_remediation_history
+                """)
+                total_records = cur.fetchone()[0]
 
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=(
-                            "Invalid JSON in remediation history "
-                            f"at line {line_number}."
-                        ),
-                    )
+                cur.execute("""
+                    SELECT record
+                    FROM mlpilot_remediation_history
+                    ORDER BY id DESC
+                    LIMIT %s
+                """, (limit,))
 
-        latest_records = list(reversed(records))[:limit]
+                records = [row[0] for row in cur.fetchall()]
 
         return {
-            "total_records": len(records),
-            "returned_records": len(latest_records),
-            "records": latest_records,
+            "total_records": total_records,
+            "returned_records": len(records),
+            "records": records,
         }
 
-    except HTTPException:
-        raise
-
-    except OSError as error:
+    except psycopg.Error:
         raise HTTPException(
             status_code=500,
-            detail=f"Could not read remediation history: {error}",
+            detail="Could not retrieve remediation history from Neon.",
         )

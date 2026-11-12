@@ -1,6 +1,7 @@
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from src.tracking.mlflow_config import configure_mlflow
 
 MODEL_NAME = "MLPilot-Demand-Forecasting"
 
@@ -11,7 +12,8 @@ def promote_model(target_version, approved=False):
             "Deployment requires explicit human approval."
         )
 
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    
+    configure_mlflow()
     client = MlflowClient()
 
     target_version = str(target_version)

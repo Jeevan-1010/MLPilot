@@ -1,18 +1,22 @@
 import math
 import json
+import os
+import hmac
 import mlflow
 import mlflow.pyfunc
 import pandas as pd
 import time
 import threading
+
 from typing import Any
 import mlflow.sklearn
 
+from src.tracking.mlflow_config import configure_mlflow
 from fastapi import FastAPI, Request, HTTPException
 from mlflow.tracking import MlflowClient
 
 from src.api.remediation_history import router as remediation_history_router
-
+from fastapi.responses import JSONResponse
 
 MODEL_NAME = "MLPilot-Demand-Forecasting"
 MODEL_ALIAS = "production"
@@ -44,6 +48,27 @@ app = FastAPI(
 
 app.include_router(remediation_history_router)
 
+@app.middleware("http")
+async def protect_admin_endpoints(request: Request, call_next):
+    if request.url.path.startswith("/admin/"):
+        admin_token = os.getenv("MLPILOT_ADMIN_TOKEN")
+
+        if not admin_token:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Admin authentication is not configured."},
+            )
+
+        supplied_token = request.headers.get("X-Admin-Token", "")
+
+        if not hmac.compare_digest(supplied_token, admin_token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing admin token."},
+            )
+
+    return await call_next(request)
+  
 model = None
 model_version = None
 model_schema = None
@@ -189,7 +214,8 @@ def load_model_schema(client, production):
 def load_production_model():
     global model, model_version, model_schema
 
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+   
+    configure_mlflow()
     client = MlflowClient()
 
     production = client.get_model_version_by_alias(

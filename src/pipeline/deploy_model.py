@@ -5,6 +5,7 @@ import time
 import requests
 import mlflow
 from mlflow.tracking import MlflowClient
+from src.tracking.mlflow_config import configure_mlflow
 
 from src.pipeline.promote_model import promote_model
 
@@ -53,7 +54,8 @@ def deploy_model(target_version, approved=False):
             "Deployment requires explicit human approval."
         )
 
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
+    
+    configure_mlflow()
     client = MlflowClient()
 
     current = client.get_model_version_by_alias(

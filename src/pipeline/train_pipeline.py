@@ -8,7 +8,7 @@ from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
-
+from src.tracking.mlflow_config import configure_mlflow
 from src.data_preparation import prepare_data
 from src.pipeline.feature_engineering import (
     create_features,
@@ -69,8 +69,8 @@ def evaluate_config(X, y, params, splitter):
 
 
 def get_production_model():
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
-
+    
+    configure_mlflow()
     print("\nLoading current production model...")
 
     model = mlflow.sklearn.load_model(

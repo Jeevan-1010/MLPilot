@@ -1,17 +1,9 @@
-
 services:
   mlpilot-api:
     build: .
     container_name: mlpilot-api
     ports:
       - "8000:8000"
-    volumes:
-      - type: bind
-        source: .
-        target: /app
-      - type: bind
-        source: .
-        target: /C/Users/jeeva/Desktop/MLpilot
     env_file:
       - .env
     restart: unless-stopped
