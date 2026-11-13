@@ -28,3 +28,6 @@ mlflow.db-wal
 data/*.csv
 artifacts/*.joblib
 artifacts/remediation_history.jsonl
+# Streamlit local secrets and configuration
+frontend/.streamlit/secrets.toml
+frontend/.streamlit/config.toml

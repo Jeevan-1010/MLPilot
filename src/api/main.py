@@ -1,22 +1,28 @@
+
 import math
 import json
 import os
 import hmac
-import mlflow
-import mlflow.pyfunc
-import pandas as pd
 import time
 import threading
+import tempfile
 
 from typing import Any
+
+import boto3
+import mlflow
+import mlflow.pyfunc
 import mlflow.sklearn
+import pandas as pd
 
 from src.tracking.mlflow_config import configure_mlflow
+from src.monitoring.monitoring_pipeline import run_monitoring
+from src.api.remediation_history import router as remediation_history_router
+
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from mlflow.tracking import MlflowClient
 
-from src.api.remediation_history import router as remediation_history_router
-from fastapi.responses import JSONResponse
 
 MODEL_NAME = "MLPilot-Demand-Forecasting"
 MODEL_ALIAS = "production"
@@ -40,6 +46,10 @@ ROLLING_FEATURES = {
     "rolling_mean_14",
 }
 
+MONITORING_BUCKET_ENV = "MLFLOW_ARTIFACTS_BUCKET"
+MONITORING_OBJECT_KEY = "monitoring/prepwise_cleaned_dataset.csv"
+
+
 app = FastAPI(
     title="MLPilot API",
     description="MLPilot - ML Model Serving API",
@@ -47,6 +57,7 @@ app = FastAPI(
 )
 
 app.include_router(remediation_history_router)
+
 
 @app.middleware("http")
 async def protect_admin_endpoints(request: Request, call_next):
@@ -68,7 +79,8 @@ async def protect_admin_endpoints(request: Request, call_next):
             )
 
     return await call_next(request)
-  
+
+
 model = None
 model_version = None
 model_schema = None
@@ -214,7 +226,6 @@ def load_model_schema(client, production):
 def load_production_model():
     global model, model_version, model_schema
 
-   
     configure_mlflow()
     client = MlflowClient()
 
@@ -327,6 +338,89 @@ def reload_model():
         )
 
 
+@app.post("/admin/monitoring/run")
+def run_monitoring_endpoint():
+
+    # Capture the currently loaded production model and schema.
+    with model_lock:
+        if model is None or model_schema is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Production model or feature schema is not loaded.",
+            )
+
+        active_model = model
+        active_version = model_version
+        active_schema = model_schema.copy()
+
+    # Validate B2 configuration.
+    required_env = [
+        MONITORING_BUCKET_ENV,
+        "MLFLOW_S3_ENDPOINT_URL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_DEFAULT_REGION",
+    ]
+
+    missing_env = [
+        key for key in required_env
+        if not os.getenv(key)
+    ]
+
+    if missing_env:
+        raise HTTPException(
+            status_code=503,
+            detail="B2 storage configuration is incomplete.",
+        )
+
+    try:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            region_name=os.environ["AWS_DEFAULT_REGION"],
+        )
+
+        bucket = os.environ[MONITORING_BUCKET_ENV]
+
+        # Download and process the dataset temporarily.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_path = os.path.join(
+                temp_dir,
+                "monitoring_dataset.csv",
+            )
+
+            s3.download_file(
+                bucket,
+                MONITORING_OBJECT_KEY,
+                data_path,
+            )
+
+            report = run_monitoring(
+                data_path=data_path,
+                model=active_model,
+                model_schema=active_schema,
+            )
+
+        report["model_version"] = active_version
+        report["monitoring_source"] = {
+            "storage": "Backblaze B2",
+            "object_key": MONITORING_OBJECT_KEY,
+        }
+
+        return report
+
+    except Exception as error:
+        print(
+            f"[MONITORING ERROR] "
+            f"{type(error).__name__}: {error}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Monitoring execution failed.",
+        )
 
 
 @app.post("/predict")

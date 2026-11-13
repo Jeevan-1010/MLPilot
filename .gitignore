@@ -36,3 +36,4 @@ data/*.csv
 # Generated runtime history
 artifacts/remediation_history.jsonl
 artifacts/*.joblib
+frontend/.streamlit/secrets.toml

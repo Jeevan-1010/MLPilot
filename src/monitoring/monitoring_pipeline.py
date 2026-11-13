@@ -20,78 +20,111 @@ FEATURES_PATH = (
     BASE_DIR / "artifacts" / "demand_forecasting_features.joblib"
 )
 
+DEFAULT_ROLLING_WINDOWS = {
+    "rolling_mean_7": 7,
+    "rolling_mean_14": 14,
+}
 
-def run_monitoring():
+DRIFT_FEATURES = [
+    "lag_1",
+    "lag_7",
+    "lag_14",
+    "rolling_mean_7",
+    "rolling_mean_14",
+]
 
+
+def run_monitoring(
+    data_path=DATA_PATH,
+    model=None,
+    model_schema=None,
+):
     print("\nStarting MLPilot Monitoring...\n")
 
     # Load historical data
-    _, daily_demand = prepare_data(DATA_PATH)
+    _, daily_demand = prepare_data(data_path)
 
-    # Generate features
-    feature_df = create_features(daily_demand)
+    # Resolve model and feature configuration
+    if model_schema is not None:
+        features = model_schema["feature_names"]
+        rolling_windows = model_schema.get(
+            "rolling_windows",
+            DEFAULT_ROLLING_WINDOWS,
+        )
+    else:
+        features = joblib.load(FEATURES_PATH)
+        rolling_windows = DEFAULT_ROLLING_WINDOWS
 
-    # Load model and feature names
-    model = joblib.load(MODEL_PATH)
-    features = joblib.load(FEATURES_PATH)
+    # Preserve standalone execution using the local model
+    if model is None:
+        model = joblib.load(MODEL_PATH)
+
+    # Generate features using the model's schema
+    feature_df = create_features(
+        daily_demand,
+        rolling_windows=rolling_windows,
+    )
+
+    # Validate required feature availability
+    missing_features = [
+        feature for feature in features
+        if feature not in feature_df.columns
+    ]
+
+    if missing_features:
+        raise ValueError(
+            f"Missing model features in monitoring data: {missing_features}"
+        )
 
     # Split into reference and current windows
+    if len(feature_df) < 60:
+        raise ValueError(
+            "At least 60 feature records are required for monitoring."
+        )
+
     reference_data = feature_df.iloc[-60:-30]
     current_data = feature_df.tail(30)
 
-    # -----------------------------
     # 1. DATA QUALITY MONITORING
-    # -----------------------------
+    quality_columns = ["daily_demand"] + features
 
     quality_results = check_data_quality(
         data=current_data,
-        required_columns=["daily_demand"] + features,
-        numeric_columns=["daily_demand"] + features,
-        non_negative_columns=["daily_demand"]
+        required_columns=quality_columns,
+        numeric_columns=quality_columns,
+        non_negative_columns=["daily_demand"],
     )
 
-    # -----------------------------
     # 2. DATA DRIFT MONITORING
-    # -----------------------------
-
     drift_features = [
-        "lag_1",
-        "lag_7",
-        "lag_14",
-        "rolling_mean_7",
-        "rolling_mean_14"
+        feature for feature in DRIFT_FEATURES
+        if feature in features
     ]
 
     drift_results = detect_drift(
         reference_data,
         current_data,
-        drift_features
-    )
+        drift_features,
+    ) if drift_features else {}
 
     drift_detected = any(
         result.get("drift_detected", False)
         for result in drift_results.values()
     )
 
-    # -----------------------------
     # 3. MODEL PERFORMANCE MONITORING
-    # -----------------------------
-
     performance_results = detect_performance_degradation(
         model,
         reference_data,
         current_data,
-        features
+        features,
     )
 
     performance_degraded = performance_results[
         "performance_degraded"
     ]
 
-    # -----------------------------
     # 4. OVERALL MODEL STATUS
-    # -----------------------------
-
     data_quality_issues = (
         quality_results["quality_status"] != "HEALTHY"
     )
@@ -103,28 +136,21 @@ def run_monitoring():
     else:
         status = "HEALTHY"
 
-    # -----------------------------
     # 5. STRUCTURED MONITORING REPORT
-    # -----------------------------
-
     monitoring_report = {
         "model_name": "MLPilot-Demand-Forecasting",
         "monitoring_status": status,
-
         "data_quality": quality_results,
-
         "data_drift": {
             "drift_detected": drift_detected,
-            "feature_results": drift_results
+            "feature_results": drift_results,
         },
-
         "model_performance": performance_results,
-
         "alerts": {
             "data_quality_issues": data_quality_issues,
             "data_drift_detected": drift_detected,
-            "performance_degraded": performance_degraded
-        }
+            "performance_degraded": performance_degraded,
+        },
     }
 
     # Print report
