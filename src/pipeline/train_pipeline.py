@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from src.tracking.mlflow_config import configure_mlflow
+from mlflow.tracking import MlflowClient
 from src.data_preparation import prepare_data
 from src.pipeline.feature_engineering import (
     create_features,
@@ -73,13 +74,16 @@ def get_production_model():
     configure_mlflow()
     print("\nLoading current production model...")
 
+    client = MlflowClient()
+    production = client.get_model_version_by_alias(MODEL_NAME, PRODUCTION_ALIAS)
+    production_version = str(production.version)
     model = mlflow.sklearn.load_model(
-        f"models:/{MODEL_NAME}@{PRODUCTION_ALIAS}"
+        f"models:/{MODEL_NAME}/{production_version}"
     )
 
-    print("Production model loaded successfully.")
+    print(f"Production model version {production_version} loaded successfully.")
 
-    return model
+    return model, production_version
 
 
 def get_production_feature_columns(model):
@@ -183,7 +187,7 @@ def run_pipeline(
     splitter = TimeSeriesSplit(n_splits=5)
 
     # 1. Load production model and recover its feature schema.
-    production_model = get_production_model()
+    production_model, production_version = get_production_model()
 
     production_features = get_production_feature_columns(
         production_model
@@ -314,6 +318,7 @@ def run_pipeline(
             "status": "failed",
             "reason": "Candidate did not meet production validation criteria.",
             "production_metrics": production_metrics,
+            "production_model_version": production_version,
             "candidate_metrics": candidate_metrics,
             "production_features": production_features,
             "candidate_features": selected_features,
@@ -327,6 +332,7 @@ def run_pipeline(
             "status": "evaluation_passed",
             "registered": False,
             "production_metrics": production_metrics,
+            "production_model_version": production_version,
             "candidate_metrics": candidate_metrics,
             "candidate_params": selected_params,
             "production_features": production_features,
@@ -369,6 +375,7 @@ def run_pipeline(
         "run_id": run_id,
         "model_version": str(registered_model.version),
         "production_metrics": production_metrics,
+            "production_model_version": production_version,
         "candidate_metrics": candidate_metrics,
         "candidate_params": selected_params,
         "production_features": production_features,
