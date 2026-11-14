@@ -1475,8 +1475,8 @@ def _start_investigation_callback() -> None:
         thread_id = data.get("thread_id") or st.session_state.get("investigator_thread_id")
         if thread_id:
             st.session_state["investigator_thread_id"] = thread_id
-            # This callback runs before the next script pass instantiates the widget.
-            st.session_state["investigator_thread_id_input"] = thread_id
+            # Never write to the text_input widget key programmatically.
+            # The stable application key drives status loading; the widget remains user-editable.
         clear_api_cache()
         if data.get("status") == "already_pending":
             notice = ("info", "An earlier investigation is already waiting for approval. Its thread has been loaded.")
