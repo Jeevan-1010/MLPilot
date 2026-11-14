@@ -144,6 +144,38 @@ def prediction_errors_node(state):
 
 def root_cause_analysis_node(state):
     diagnostic_results = state.get("diagnostic_results", {})
+    monitoring_report = state.get("monitoring_report", {})
+    alerts = monitoring_report.get("alerts", {})
+    quality = monitoring_report.get("data_quality", {})
+    performance = monitoring_report.get("model_performance", {})
+
+    # Drift is an early-warning signal, not proof that the model needs
+    # remediation. If data quality is healthy and measured model performance
+    # has not degraded, stop before proposing a potentially harmful change.
+    quality_healthy = quality.get("quality_status") == "HEALTHY"
+    performance_not_degraded = (
+        alerts.get("performance_degraded") is False
+        or performance.get("performance_degraded") is False
+    )
+    drift_detected = alerts.get("data_drift_detected") is True
+
+    if quality_healthy and performance_not_degraded and drift_detected:
+        return {
+            "root_cause": (
+                "Feature distribution drift was detected, but data quality is "
+                "healthy and measured model performance has not degraded. "
+                "Drift alone does not establish that changing features or "
+                "retraining will improve the model."
+            ),
+            "recommended_action": (
+                "Monitor the drift and collect more performance evidence. "
+                "No remediation or retraining is recommended at this time."
+            ),
+            "remediation_action": {
+                "action_type": "none",
+                "parameters": {},
+            },
+        }
 
     if not diagnostic_results:
         return {
