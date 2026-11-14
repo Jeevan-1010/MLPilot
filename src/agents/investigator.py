@@ -41,6 +41,9 @@ class InvestigatorState(TypedDict, total=False):
     remediation_status: str
     retraining_result: dict
     test_feature_data: Any
+    deployment_approval: Any
+    deployment_status: str
+    deployment_result: dict
 
 
 load_dotenv()
