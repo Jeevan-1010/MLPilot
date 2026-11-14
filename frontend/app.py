@@ -1685,13 +1685,13 @@ CAPABILITIES = [
     ("Remediation and evaluation history", "Implemented (admin)", "GET /admin/remediation-history"),
     ("Model registry version list and per-version metrics", "Requires backend support",
      "No endpoint exists"),
-    ("Promote a candidate / roll back production", "Requires backend support",
-     "Pipeline modules exist in the repository but are not exposed by the API"),
+    ("Promote a candidate / roll back production", "Implemented (admin, approval-gated)",
+     "POST /admin/investigator/{thread_id}/approve"),
     ("Inspect the active feature schema", "Requires backend support", "Not returned by any endpoint"),
-    ("Drift and model-performance monitoring", "Requires backend support",
-     "Monitoring pipeline runs offline; no endpoint"),
-    ("Start or approve an AI investigation", "Requires backend support",
-     "Agent runs in the backend codebase; no endpoint"),
+    ("Drift and model-performance monitoring", "Implemented (admin)",
+     "POST /admin/monitoring/run and /admin/investigator/start"),
+    ("Start or approve an AI investigation", "Implemented (admin)",
+     "POST /admin/investigator/start, GET status, POST approve"),
 ]
 
 
