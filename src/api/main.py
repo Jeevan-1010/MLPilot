@@ -13,6 +13,7 @@ from typing import Any
 
 from langgraph.types import Command
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 from psycopg_pool import ConnectionPool
 from src.agents.investigator import build_investigator_graph
 
@@ -337,23 +338,31 @@ def startup_event():
     global checkpoint_pool, investigator_graph
     load_production_model()
 
-    database_url = os.getenv("MLFLOW_TRACKING_URI")
-    if not database_url or not database_url.startswith(("postgresql://", "postgres://")):
-        raise RuntimeError(
-            "MLFLOW_TRACKING_URI must point to the Neon PostgreSQL database for persistent Investigator checkpoints."
+    # Keep checkpoint storage separate from MLflow's tracking backend.
+    # Render must use durable PostgreSQL; local development/tests can use memory.
+    database_url = os.getenv("LANGGRAPH_CHECKPOINT_DB_URI")
+    if database_url:
+        if not database_url.startswith(("postgresql://", "postgres://")):
+            raise RuntimeError("LANGGRAPH_CHECKPOINT_DB_URI must be a PostgreSQL connection URL.")
+        checkpoint_pool = ConnectionPool(
+            conninfo=database_url,
+            kwargs={"autocommit": True, "prepare_threshold": 0},
+            min_size=1,
+            max_size=5,
+            open=False,
         )
-
-    checkpoint_pool = ConnectionPool(
-        conninfo=database_url,
-        kwargs={"autocommit": True, "prepare_threshold": 0},
-        min_size=1,
-        max_size=5,
-        open=False,
-    )
-    checkpoint_pool.open()
-    checkpoint_pool.wait()
-    checkpointer = PostgresSaver(checkpoint_pool)
-    checkpointer.setup()
+        checkpoint_pool.open()
+        checkpoint_pool.wait()
+        checkpointer = PostgresSaver(checkpoint_pool)
+        checkpointer.setup()
+        print("AI Investigator initialized with persistent PostgreSQL checkpointing.")
+    elif os.getenv("RENDER_SERVICE_ID"):
+        raise RuntimeError(
+            "LANGGRAPH_CHECKPOINT_DB_URI is required on Render for persistent Investigator approvals."
+        )
+    else:
+        checkpointer = MemorySaver()
+        print("AI Investigator initialized with in-memory checkpoints (local/test mode).")
 
     investigator_graph = build_investigator_graph(
         checkpointer=checkpointer,
