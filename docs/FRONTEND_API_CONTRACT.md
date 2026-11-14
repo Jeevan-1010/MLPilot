@@ -73,7 +73,7 @@ A successful first approval can return `awaiting_deployment_approval`; render th
 
 The API needs its existing MLflow, Neon, Groq and Backblaze B2 environment variables. In addition:
 - `MLPILOT_ADMIN_TOKEN`: strong secret used by all admin endpoints and the scheduled workflow.
-- `MLFLOW_TRACKING_URI`: must be the Neon PostgreSQL connection URI for persistent LangGraph checkpoints.
+- `LANGGRAPH_CHECKPOINT_DB_URI`: Neon PostgreSQL connection URI used for persistent LangGraph checkpoints. Keep this separate from `MLFLOW_TRACKING_URI`.
 - GitHub Actions repository secrets: `MLPILOT_API_URL` and `MLPILOT_ADMIN_TOKEN`.
 
 The workflow's active-investigation guard is process-local. PostgreSQL preserves graph checkpoints across restarts, but a multi-instance deployment should use a database-backed global lock before running multiple API instances.
