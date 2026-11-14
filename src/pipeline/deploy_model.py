@@ -3,6 +3,7 @@ import os
 import time
 
 import requests
+import mlflow  # Backward-compatible module attribute used by deployment tests/integrations.
 from mlflow.tracking import MlflowClient
 
 from src.tracking.mlflow_config import configure_mlflow
