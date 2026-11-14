@@ -2,7 +2,7 @@
 from pathlib import Path
 import joblib
 
-from src.data_preparation import prepare_data
+from src.data_preparation import prepare_daily_demand
 from src.pipeline.feature_engineering import create_features
 
 from src.monitoring.data_drift import detect_drift
@@ -42,7 +42,7 @@ def run_monitoring(
     print("\nStarting MLPilot Monitoring...\n")
 
     # Load historical data
-    _, daily_demand = prepare_data(data_path)
+    daily_demand = prepare_daily_demand(data_path)
 
     # Resolve model and feature configuration
     if model_schema is not None:

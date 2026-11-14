@@ -1,6 +1,4 @@
 
-from pathlib import Path
-
 import pandas as pd
 
 
@@ -9,13 +7,6 @@ import pandas as pd
 # --------------------------------------------------
 
 def load_and_prepare_data(data_path):
-    """
-    Load the cleaned transaction CSV and apply the
-    subject-model-specific preparation from the notebook.
-    """
-
-    df = pd.read_csv(data_path)
-
     required_columns = [
         "invoice",
         "stockcode",
@@ -27,48 +18,14 @@ def load_and_prepare_data(data_path):
         "country",
     ]
 
-    missing_columns = [
-        col for col in required_columns
-        if col not in df.columns
-    ]
+    df = pd.read_csv(data_path, usecols=required_columns)
 
-    if missing_columns:
-        raise ValueError(
-            f"Missing required columns: {missing_columns}"
-        )
-
-    # Remove negative-price records
-    df = df[df["price"] >= 0].copy()
-
-    # Convert invoice date to datetime
-    df["invoicedate"] = pd.to_datetime(
-        df["invoicedate"]
-    )
-
-    # Remove records without descriptions
-    df = df.dropna(
-        subset=["description"]
-    ).copy()
-
-    # Replace missing customer IDs
-    df["customer_id"] = (
-        df["customer_id"].fillna("Unknown")
-    )
-
-    # Remove zero-price records
-    df = df[df["price"] > 0].copy()
-
-    # Identify cancellations
-    df["is_cancelled"] = (
-        df["invoice"]
-        .astype(str)
-        .str.startswith("C")
-    )
-
-    # Calculate revenue
-    df["revenue"] = (
-        df["quantity"] * df["price"]
-    )
+    df = df[df["price"] > 0]
+    df["invoicedate"] = pd.to_datetime(df["invoicedate"])
+    df = df.dropna(subset=["description"])
+    df["customer_id"] = df["customer_id"].fillna("Unknown")
+    df["is_cancelled"] = df["invoice"].astype(str).str.startswith("C")
+    df["revenue"] = df["quantity"] * df["price"]
 
     return df
 
@@ -78,50 +35,29 @@ def load_and_prepare_data(data_path):
 # --------------------------------------------------
 
 def create_daily_demand(df):
-    """
-    Create daily demand using positive quantities only,
-    matching the notebook's demand aggregation logic.
-    """
+    sales_df = df.loc[
+        df["quantity"] > 0,
+        ["invoicedate", "quantity"],
+    ]
 
-    # Keep only genuine sales
-    sales_df = df[
-        df["quantity"] > 0
-    ].copy()
-
-    # Extract date without time
-    sales_df["date"] = (
-        sales_df["invoicedate"].dt.date
-    )
-
-    # Aggregate quantity sold per day
     daily_demand = (
-        sales_df.groupby("date")["quantity"]
+        sales_df.groupby(
+            sales_df["invoicedate"].dt.normalize()
+        )["quantity"]
         .sum()
         .reset_index()
     )
 
-    # Rename target column
-    daily_demand.rename(
-        columns={"quantity": "daily_demand"},
-        inplace=True,
-    )
+    daily_demand.columns = ["date", "daily_demand"]
 
-    # Convert date back to datetime
-    daily_demand["date"] = pd.to_datetime(
-        daily_demand["date"]
-    )
-
-    # Create complete daily calendar
     all_dates = pd.date_range(
         start=daily_demand["date"].min(),
         end=daily_demand["date"].max(),
         freq="D",
     )
 
-    # Fill missing dates with zero demand
     daily_demand = (
-        daily_demand
-        .set_index("date")
+        daily_demand.set_index("date")
         .reindex(all_dates, fill_value=0)
         .rename_axis("date")
         .reset_index()
@@ -131,16 +67,65 @@ def create_daily_demand(df):
 
 
 # --------------------------------------------------
-# 3. COMPLETE DATA PREPARATION PIPELINE
+# 3. ORIGINAL PIPELINE — PRESERVES TWO-VALUE RETURN
 # --------------------------------------------------
 
 def prepare_data(data_path):
-    """
-    Run the complete data preparation workflow.
-    """
-
     df = load_and_prepare_data(data_path)
-
     daily_demand = create_daily_demand(df)
 
     return df, daily_demand
+
+
+# --------------------------------------------------
+# 4. LIGHTWEIGHT DAILY DEMAND PREPARATION
+# --------------------------------------------------
+
+def prepare_daily_demand(data_path):
+    """
+    Load only the columns required for monitoring.
+    Avoids loading the full transaction dataset.
+    """
+
+    df = pd.read_csv(
+        data_path,
+        usecols=["description", "price", "quantity", "invoicedate"],
+    )
+
+    df = df.loc[
+        (df["price"] > 0)
+        & df["description"].notna()
+        & (df["quantity"] > 0),
+        ["invoicedate", "quantity"],
+    ]
+
+    df["invoicedate"] = pd.to_datetime(df["invoicedate"])
+
+    daily_demand = (
+        df.groupby(
+            df["invoicedate"].dt.normalize()
+        )["quantity"]
+        .sum()
+        .rename("daily_demand")
+        .reset_index()
+    )
+
+    daily_demand.columns = ["date", "daily_demand"]
+
+    if daily_demand.empty:
+        raise ValueError("No valid positive-demand records found.")
+
+    all_dates = pd.date_range(
+        start=daily_demand["date"].min(),
+        end=daily_demand["date"].max(),
+        freq="D",
+    )
+
+    daily_demand = (
+        daily_demand.set_index("date")
+        .reindex(all_dates, fill_value=0)
+        .rename_axis("date")
+        .reset_index()
+    )
+
+    return daily_demand
