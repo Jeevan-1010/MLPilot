@@ -1465,18 +1465,30 @@ def _render_investigation(record: dict, expanded: bool) -> None:
             st.caption(f"Candidate registered: {'yes' if evaluation['registered'] else 'no'}")
 
 
+# Session-state keys for the Investigator page.
+#   ACTIVE_THREAD_KEY  - plain application state: the thread currently being viewed.
+#   THREAD_INPUT_KEY   - the key of the "Investigation thread ID" text_input WIDGET.
+# Streamlit only allows writing a widget's key (a) in a widget callback, which runs
+# before the next script pass creates the widget, or (b) in the script *before* the
+# widget is created. Writing it anywhere after the widget call raises
+# StreamlitWidgetAlreadyInstantiatedError.
+ACTIVE_THREAD_KEY = "investigator_thread_id"
+THREAD_INPUT_KEY = "investigator_thread_id_input"
+
+
 def _start_investigation_callback() -> None:
-    """Run before widgets are instantiated on the next Streamlit rerun."""
+    """Button on_click callback: runs before the next script pass creates any widget."""
     with st.spinner("Running monitoring and starting the Investigator..."):
         result = api_start_investigation()
 
     if result.ok:
         data = result.data or {}
-        thread_id = data.get("thread_id") or st.session_state.get("investigator_thread_id")
+        thread_id = data.get("thread_id") or st.session_state.get(ACTIVE_THREAD_KEY)
         if thread_id:
-            st.session_state["investigator_thread_id"] = thread_id
-            # Never write to the text_input widget key programmatically.
-            # The stable application key drives status loading; the widget remains user-editable.
+            st.session_state[ACTIVE_THREAD_KEY] = thread_id
+            # Safe here (and only here): this is a callback, so the text_input has not
+            # been instantiated yet in the run that follows. It keeps the box in sync.
+            st.session_state[THREAD_INPUT_KEY] = thread_id
         clear_api_cache()
         if data.get("status") == "already_pending":
             notice = ("info", "An earlier investigation is already waiting for approval. Its thread has been loaded.")
@@ -1510,11 +1522,14 @@ def page_investigator() -> None:
         "Nothing is retrained or deployed unless you explicitly approve each separate stage."
     )
 
-    saved_thread = st.session_state.get("investigator_thread_id", "")
+    # Seed the box BEFORE the widget exists (allowed). Widget state is dropped when the
+    # user leaves this page, so re-seed from the active thread. No `value=` is passed:
+    # combining it with a Session State write triggers a Streamlit warning.
+    if THREAD_INPUT_KEY not in st.session_state:
+        st.session_state[THREAD_INPUT_KEY] = st.session_state.get(ACTIVE_THREAD_KEY, "")
     thread_input = st.text_input(
         "Investigation thread ID",
-        value=saved_thread,
-        key="investigator_thread_id_input",
+        key=THREAD_INPUT_KEY,
         help="The ID is returned when an investigation starts. Paste an earlier ID here to resume viewing it.",
     )
     notice = st.session_state.pop("investigator_start_notice", None)
@@ -1536,12 +1551,12 @@ def page_investigator() -> None:
     with col_load:
         if st.button("Load thread / refresh status"):
             if thread_input.strip():
-                st.session_state["investigator_thread_id"] = thread_input.strip()
+                st.session_state[ACTIVE_THREAD_KEY] = thread_input.strip()
                 st.rerun()
             else:
                 st.warning("Enter an investigation thread ID first.")
 
-    thread_id = st.session_state.get("investigator_thread_id") or thread_input.strip()
+    thread_id = st.session_state.get(ACTIVE_THREAD_KEY) or thread_input.strip()
     if not thread_id:
         st.info("No investigation selected. Start a cycle or enter an existing thread ID.")
         return
