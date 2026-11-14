@@ -432,7 +432,7 @@ CSS = """
   box-sizing: border-box;
 }
 
-html, body, .stApp, [class*="st-"] {
+.stApp {
   font-family: Inter, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
