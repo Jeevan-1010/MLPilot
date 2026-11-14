@@ -6,8 +6,16 @@ import hmac
 import time
 import threading
 import tempfile
+import uuid
+from contextlib import contextmanager
 
 from typing import Any
+
+from langgraph.types import Command
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
+from psycopg_pool import ConnectionPool
+from src.agents.investigator import build_investigator_graph
 
 import boto3
 import mlflow
@@ -16,7 +24,7 @@ import mlflow.sklearn
 import pandas as pd
 
 from src.tracking.mlflow_config import configure_mlflow
-from src.monitoring.monitoring_pipeline import run_monitoring
+from src.monitoring.monitoring_pipeline import run_monitoring, prepare_investigator_data
 from src.api.remediation_history import router as remediation_history_router
 
 from fastapi import FastAPI, Request, HTTPException
@@ -84,7 +92,11 @@ async def protect_admin_endpoints(request: Request, call_next):
 model = None
 model_version = None
 model_schema = None
+checkpoint_pool = None
+investigator_graph = None
 model_lock = threading.RLock()
+investigation_lock = threading.Lock()
+active_investigation_thread = None
 
 request_count = 0
 total_latency = 0.0
@@ -263,9 +275,110 @@ def load_production_model():
     return True
 
 
+
+
+@contextmanager
+def production_data_context():
+    """Acquire the B2 dataset for one remediation execution."""
+    required = [
+        MONITORING_BUCKET_ENV,
+        "MLFLOW_S3_ENDPOINT_URL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_DEFAULT_REGION",
+    ]
+    missing = [key for key in required if not os.getenv(key)]
+    if missing:
+        raise RuntimeError(f"B2 storage configuration is incomplete: {missing}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        data_path = os.path.join(temp_dir, "investigator_dataset.csv")
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            region_name=os.environ["AWS_DEFAULT_REGION"],
+        )
+        s3.download_file(
+            os.environ[MONITORING_BUCKET_ENV],
+            MONITORING_OBJECT_KEY,
+            data_path,
+        )
+        yield data_path
+
+
+def deploy_candidate_model(
+    target_version,
+    approved=False,
+    expected_previous_version=None,
+):
+    """Deploy within this API process and verify the in-memory serving model."""
+    from src.pipeline.deploy_model import deploy_model
+
+    def verify_loaded_version(expected_version):
+        with model_lock:
+            return (
+                model is not None
+                and model_schema is not None
+                and str(model_version) == str(expected_version)
+            )
+
+    return deploy_model(
+        target_version,
+        approved=approved,
+        expected_previous_version=expected_previous_version,
+        reload_callback=load_production_model,
+        verify_callback=verify_loaded_version,
+    )
+
+
 @app.on_event("startup")
 def startup_event():
+    global checkpoint_pool, investigator_graph
     load_production_model()
+
+    # Keep checkpoint storage separate from MLflow's tracking backend.
+    # Render must use durable PostgreSQL; local development/tests can use memory.
+    database_url = os.getenv("LANGGRAPH_CHECKPOINT_DB_URI")
+    if database_url:
+        if not database_url.startswith(("postgresql://", "postgres://")):
+            raise RuntimeError("LANGGRAPH_CHECKPOINT_DB_URI must be a PostgreSQL connection URL.")
+        checkpoint_pool = ConnectionPool(
+            conninfo=database_url,
+            kwargs={"autocommit": True, "prepare_threshold": 0},
+            min_size=1,
+            max_size=5,
+            open=False,
+        )
+        checkpoint_pool.open()
+        checkpoint_pool.wait()
+        checkpointer = PostgresSaver(checkpoint_pool)
+        checkpointer.setup()
+        print("AI Investigator initialized with persistent PostgreSQL checkpointing.")
+    elif os.getenv("RENDER_SERVICE_ID"):
+        raise RuntimeError(
+            "LANGGRAPH_CHECKPOINT_DB_URI is required on Render for persistent Investigator approvals."
+        )
+    else:
+        checkpointer = MemorySaver()
+        print("AI Investigator initialized with in-memory checkpoints (local/test mode).")
+
+    investigator_graph = build_investigator_graph(
+        checkpointer=checkpointer,
+        model_provider=lambda: model,
+        data_context_provider=production_data_context,
+        deployment_provider=deploy_candidate_model,
+    )
+    print("AI Investigator initialized with PostgreSQL checkpointing.")
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    global checkpoint_pool
+    if checkpoint_pool is not None:
+        checkpoint_pool.close()
+        print("AI Investigator PostgreSQL connection pool closed.")
 
 
 @app.middleware("http")
@@ -421,6 +534,204 @@ def run_monitoring_endpoint():
             status_code=500,
             detail="Monitoring execution failed.",
         )
+
+
+
+
+@app.post("/admin/investigator/start")
+def start_investigation():
+    global active_investigation_thread
+    if investigator_graph is None:
+        raise HTTPException(status_code=503, detail="AI Investigator is not initialized.")
+
+    with model_lock:
+        if model is None or model_schema is None:
+            raise HTTPException(status_code=503, detail="Production model/schema is unavailable.")
+        active_model, active_version, active_schema = model, model_version, model_schema.copy()
+
+    with investigation_lock:
+        if active_investigation_thread == "starting":
+            return {"status": "already_starting"}
+        if active_investigation_thread:
+            existing_config = {"configurable": {"thread_id": active_investigation_thread}}
+            existing = investigator_graph.get_state(existing_config)
+            if existing and existing.next:
+                return {
+                    "status": "already_pending",
+                    "thread_id": active_investigation_thread,
+                    "pending_nodes": list(existing.next),
+                }
+        active_investigation_thread = "starting"
+
+    try:
+        with production_data_context() as data_path:
+            report = run_monitoring(
+                data_path=data_path,
+                model=active_model,
+                model_schema=active_schema,
+            )
+            reference_data, current_data, features = prepare_investigator_data(
+                data_path, active_schema
+            )
+
+        thread_id = str(uuid.uuid4())
+        config = {"configurable": {"thread_id": thread_id}}
+        initial_state = {
+            "monitoring_report": report,
+            "reference_data": reference_data,
+            "current_data": current_data,
+            "features": features,
+            "selected_tools": [],
+            "diagnostic_results": {},
+            "root_cause": "",
+            "recommended_action": "",
+            "remediation_action": {},
+            "human_approval": {},
+            "remediation_status": "pending",
+            "retraining_result": {},
+            "test_feature_data": None,
+            "deployment_approval": {},
+            "deployment_status": "not_started",
+            "deployment_result": {},
+        }
+        investigator_graph.invoke(initial_state, config=config)
+        snapshot = investigator_graph.get_state(config)
+        pending = set(snapshot.next or [])
+        with investigation_lock:
+            active_investigation_thread = thread_id if pending else None
+
+        if "human_approval" in pending:
+            status = "awaiting_remediation_approval"
+        elif "deployment_approval" in pending:
+            status = "awaiting_deployment_approval"
+        else:
+            status = "completed"
+
+        values = snapshot.values or {}
+        return {
+            "thread_id": thread_id,
+            "model_version": active_version,
+            "status": status,
+            "pending_nodes": list(pending),
+            "monitoring_report": report,
+            "root_cause": values.get("root_cause"),
+            "recommended_action": values.get("recommended_action"),
+            "remediation_action": values.get("remediation_action"),
+            "remediation_status": values.get("remediation_status"),
+        }
+    except Exception as error:
+        with investigation_lock:
+            if active_investigation_thread == "starting":
+                active_investigation_thread = None
+        print(f"[INVESTIGATOR ERROR] {type(error).__name__}: {error}")
+        raise HTTPException(status_code=500, detail="Investigator execution failed.")
+
+
+@app.get("/admin/investigator/{thread_id}")
+def get_investigation(thread_id: str):
+    if investigator_graph is None:
+        raise HTTPException(status_code=503, detail="AI Investigator is not initialized.")
+    config = {"configurable": {"thread_id": thread_id}}
+    snapshot = investigator_graph.get_state(config)
+    if not snapshot or not snapshot.values:
+        raise HTTPException(status_code=404, detail="Investigation not found.")
+    values = snapshot.values
+    pending = set(snapshot.next or [])
+    if "human_approval" in pending:
+        status = "awaiting_remediation_approval"
+    elif "deployment_approval" in pending:
+        status = "awaiting_deployment_approval"
+    else:
+        status = "completed"
+    retraining = values.get("retraining_result") or {}
+    return {
+        "thread_id": thread_id,
+        "status": status,
+        "pending_nodes": list(pending),
+        "monitoring_report": values.get("monitoring_report"),
+        "root_cause": values.get("root_cause"),
+        "recommended_action": values.get("recommended_action"),
+        "remediation_action": values.get("remediation_action"),
+        "remediation_status": values.get("remediation_status"),
+        "retraining_result": retraining,
+        "deployment_status": values.get("deployment_status"),
+        "deployment_result": values.get("deployment_result"),
+        "pending_approval": (
+            {
+                "stage": "deployment",
+                "candidate_version": retraining.get("model_version"),
+                "candidate_metrics": retraining.get("candidate_metrics"),
+                "production_metrics": retraining.get("production_metrics"),
+            }
+            if "deployment_approval" in pending else None
+        ),
+    }
+
+
+@app.post("/admin/investigator/{thread_id}/approve")
+def approve_investigation(thread_id: str, request: dict[str, Any]):
+    global active_investigation_thread
+    if investigator_graph is None:
+        raise HTTPException(status_code=503, detail="AI Investigator is not initialized.")
+    approved = request.get("approved")
+    if not isinstance(approved, bool):
+        raise HTTPException(status_code=400, detail="'approved' must be true or false.")
+
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        snapshot = investigator_graph.get_state(config)
+        pending = set(snapshot.next or []) if snapshot else set()
+        if not pending:
+            raise HTTPException(status_code=404, detail="No pending approval for this investigation.")
+        if "human_approval" in pending:
+            stage = "remediation"
+        elif "deployment_approval" in pending:
+            stage = "deployment"
+        else:
+            raise HTTPException(status_code=409, detail="Investigation is not waiting for approval.")
+
+        investigator_graph.invoke(
+            Command(resume={"approved": approved, "feedback": request.get("feedback", "")}),
+            config=config,
+        )
+        updated = investigator_graph.get_state(config)
+        values = updated.values or {}
+        next_nodes = set(updated.next or [])
+        if "deployment_approval" in next_nodes:
+            status = "awaiting_deployment_approval"
+        elif "human_approval" in next_nodes:
+            status = "awaiting_remediation_approval"
+        else:
+            status = "completed"
+            with investigation_lock:
+                if active_investigation_thread == thread_id:
+                    active_investigation_thread = None
+
+        retraining = values.get("retraining_result") or {}
+        return {
+            "thread_id": thread_id,
+            "approval_stage": stage,
+            "approved": approved,
+            "status": status,
+            "remediation_status": values.get("remediation_status"),
+            "retraining_result": retraining,
+            "deployment_status": values.get("deployment_status"),
+            "deployment_result": values.get("deployment_result"),
+            "pending_approval": (
+                {
+                    "stage": "deployment",
+                    "candidate_version": retraining.get("model_version"),
+                    "candidate_metrics": retraining.get("candidate_metrics"),
+                    "production_metrics": retraining.get("production_metrics"),
+                }
+                if status == "awaiting_deployment_approval" else None
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as error:
+        print(f"[INVESTIGATOR APPROVAL ERROR] {type(error).__name__}: {error}")
+        raise HTTPException(status_code=500, detail="Investigator approval failed.")
 
 
 @app.post("/predict")

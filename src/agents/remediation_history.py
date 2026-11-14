@@ -25,6 +25,10 @@ def save_remediation_record(state: dict) -> dict:
         "parameters": action.get("parameters", {}),
         "human_approval": approval,
         "remediation_status": state.get("remediation_status"),
+        "deployment_status": state.get("deployment_status"),
+        "deployment_result": state.get("deployment_result"),
+        "deployment_approval": state.get("deployment_approval"),
+        "candidate_model_version": result.get("model_version"),
         "evaluation": {
             "status": result.get("status"),
             "production_metrics": result.get("production_metrics"),
