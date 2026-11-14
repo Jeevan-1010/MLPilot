@@ -48,16 +48,16 @@ class InvestigatorState(TypedDict, total=False):
 
 load_dotenv()
 
-api_key = os.getenv("GROQ_API_KEY")
-
-if not api_key:
-    raise ValueError("GROQ_API_KEY not found in environment variables")
-
-llm = ChatGroq(
-    model="openai/gpt-oss-20b",
-    temperature=0,
-    api_key=api_key,
-)
+def get_llm():
+    """Create the Groq client only when an investigation actually needs it."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is required to run the AI Investigator.")
+    return ChatGroq(
+        model="openai/gpt-oss-20b",
+        temperature=0,
+        api_key=api_key,
+    )
 
 
 AVAILABLE_DIAGNOSTIC_TOOLS = {
@@ -87,7 +87,7 @@ Select relevant tools.
 Return ONLY comma-separated tool names.
 """
 
-    response = llm.invoke(prompt)
+    response = get_llm().invoke(prompt)
 
     selected_tools = [
         tool.strip()
