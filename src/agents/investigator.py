@@ -426,3 +426,281 @@ def build_investigator_graph():
     memory = MemorySaver()
 
     return graph.compile(checkpointer=memory)
+
+
+# ---------------------------------------------------------------------------
+# MLPilot approval workflow (API/checkpointer-aware implementation)
+# ---------------------------------------------------------------------------
+from contextlib import nullcontext
+from src.pipeline.deploy_model import deploy_model as _deploy_model
+
+
+def _workflow_save_history(state):
+    try:
+        save_remediation_record(state)
+    except Exception as error:
+        print(f"Warning: could not save remediation history: {error}")
+
+
+def _workflow_no_action_node(state):
+    updates = {
+        "remediation_status": "No actionable issue detected; no remediation required.",
+        "retraining_result": {"status": "skipped"},
+        "deployment_status": "not_required",
+    }
+    _workflow_save_history({**state, **updates})
+    return updates
+
+
+def _workflow_remediation_rejected_node(state):
+    updates = {
+        "remediation_status": "Remediation rejected by human; no candidate was trained.",
+        "retraining_result": {"status": "rejected"},
+        "deployment_status": "not_started",
+    }
+    _workflow_save_history({**state, **updates})
+    return updates
+
+
+def _workflow_route_after_root_cause(state):
+    action = state.get("remediation_action") or {}
+    return "no_action" if action.get("action_type", "none") == "none" else "approval"
+
+
+def _workflow_route_after_approval(state):
+    approval = state.get("human_approval") or {}
+    return (
+        "remediation"
+        if isinstance(approval, dict) and approval.get("approved") is True
+        else "rejected"
+    )
+
+
+def _workflow_remediation_node(state, data_context_provider=None):
+    approval = state.get("human_approval") or {}
+    if not isinstance(approval, dict) or approval.get("approved") is not True:
+        return _workflow_remediation_rejected_node(state)
+
+    action = state.get("remediation_action") or {}
+    action_type = action.get("action_type", "none")
+    parameters = action.get("parameters", {})
+    if action_type == "none":
+        return _workflow_no_action_node(state)
+
+    try:
+        validated = execute_remediation_action(action_type, parameters)
+        if validated.get("status") != "validated":
+            updates = {
+                "remediation_status": "Remediation validation failed.",
+                "retraining_result": validated,
+                "deployment_status": "not_started",
+            }
+            _workflow_save_history({**state, **updates})
+            return updates
+
+        provider = data_context_provider or (lambda: nullcontext(DATA_PATH))
+        with provider() as data_path:
+            kwargs = {"data_path": data_path, "register_candidate": True}
+            if action_type == "update_hyperparameters":
+                kwargs["candidate_params"] = validated["candidate_params"]
+            elif action_type == "remove_feature":
+                kwargs["feature_columns"] = validated["feature_columns"]
+            elif action_type == "change_rolling_window":
+                windows = validated["rolling_windows"]
+                verification = verify_and_correct_rolling_features(
+                    data_path, state.get("test_feature_data"), rolling_windows=windows
+                )
+                if verification.get("status") == "failed":
+                    updates = {
+                        "remediation_status": "Rolling-window verification failed; training skipped.",
+                        "retraining_result": verification,
+                        "deployment_status": "not_started",
+                    }
+                    _workflow_save_history({**state, **updates})
+                    return updates
+                kwargs["rolling_windows"] = windows
+                if verification.get("corrected_data") is not None:
+                    kwargs["feature_data"] = verification["corrected_data"]
+            result = run_pipeline(**kwargs)
+
+        ready = (
+            result.get("status") == "passed"
+            and result.get("registered") is True
+            and bool(result.get("model_version"))
+        )
+        if not ready:
+            updates = {
+                "remediation_status": "Candidate did not pass validation or registration; production remains unchanged.",
+                "retraining_result": result,
+                "deployment_status": "not_started",
+            }
+            _workflow_save_history({**state, **updates})
+            return updates
+
+        return {
+            "remediation_status": "Candidate passed evaluation and was registered; awaiting separate deployment approval.",
+            "retraining_result": result,
+            "deployment_status": "awaiting_human_approval",
+        }
+    except Exception as error:
+        updates = {
+            "remediation_status": f"Remediation failed: {error}",
+            "retraining_result": {"status": "failed", "error": str(error)},
+            "deployment_status": "not_started",
+        }
+        _workflow_save_history({**state, **updates})
+        return updates
+
+
+def _workflow_route_after_remediation(state):
+    result = state.get("retraining_result") or {}
+    if (
+        state.get("deployment_status") == "awaiting_human_approval"
+        and result.get("registered") is True
+        and result.get("model_version")
+    ):
+        return "deployment_approval"
+    return "end"
+
+
+def _workflow_deployment_approval_node(state):
+    result = state.get("retraining_result") or {}
+    approval = interrupt({
+        "stage": "deployment",
+        "message": "Candidate passed evaluation. Explicit approval is required before production changes.",
+        "candidate_version": str(result.get("model_version")),
+        "production_metrics": result.get("production_metrics"),
+        "candidate_metrics": result.get("candidate_metrics"),
+        "candidate_features": result.get("features"),
+    })
+    return {"deployment_approval": approval}
+
+
+def _workflow_route_after_deployment_approval(state):
+    approval = state.get("deployment_approval") or {}
+    return (
+        "deploy"
+        if isinstance(approval, dict) and approval.get("approved") is True
+        else "rejected"
+    )
+
+
+def _workflow_deployment_rejected_node(state):
+    updates = {
+        "deployment_status": "rejected; candidate was not promoted and production remains unchanged.",
+        "deployment_result": {"status": "rejected"},
+    }
+    _workflow_save_history({**state, **updates})
+    return updates
+
+
+def _workflow_deployment_node(state, deployment_provider=None):
+    result = state.get("retraining_result") or {}
+    candidate_version = result.get("model_version")
+    if not candidate_version:
+        return {
+            "deployment_status": "failed",
+            "deployment_result": {"status": "failed", "error": "Candidate version missing."},
+        }
+    provider = deployment_provider or _deploy_model
+    try:
+        deployed = provider(
+            str(candidate_version),
+            approved=True,
+            expected_previous_version=result.get("production_model_version"),
+        )
+        status = deployed.get("status", "unknown")
+        updates = {
+            "deployment_status": "deployed" if status == "success" else (
+                "rolled_back" if status == "rolled_back" else status
+            ),
+            "deployment_result": deployed,
+        }
+        _workflow_save_history({**state, **updates})
+        return updates
+    except Exception as error:
+        updates = {
+            "deployment_status": "failed",
+            "deployment_result": {"status": "failed", "error": str(error)},
+        }
+        _workflow_save_history({**state, **updates})
+        return updates
+
+
+def build_investigator_graph(
+    checkpointer=None,
+    model_provider=None,
+    data_context_provider=None,
+    deployment_provider=None,
+):
+    graph = StateGraph(InvestigatorState)
+    graph.add_node("select_tools", select_diagnostic_tools)
+    graph.add_node("data_quality", data_quality_node)
+    graph.add_node("data_drift", data_drift_node)
+    graph.add_node("feature_drift", feature_drift_node)
+
+    if model_provider is None:
+        graph.add_node("prediction_errors", prediction_errors_node)
+    else:
+        def prediction_errors_with_active_model(state):
+            if "analyze_prediction_errors" not in state.get("selected_tools", []):
+                return {"diagnostic_results": {}}
+            return {
+                "diagnostic_results": {
+                    "prediction_errors": run_prediction_error_analysis(
+                        state, model=model_provider()
+                    )
+                }
+            }
+        graph.add_node("prediction_errors", prediction_errors_with_active_model)
+
+    def remediation_with_data(state):
+        return _workflow_remediation_node(state, data_context_provider)
+
+    def deployment_with_provider(state):
+        return _workflow_deployment_node(state, deployment_provider)
+
+    graph.add_node("root_cause_analysis", root_cause_analysis_node)
+    graph.add_node("no_action", _workflow_no_action_node)
+    graph.add_node("human_approval", human_approval_node)
+    graph.add_node("remediation", remediation_with_data)
+    graph.add_node("remediation_rejected", _workflow_remediation_rejected_node)
+    graph.add_node("deployment_approval", _workflow_deployment_approval_node)
+    graph.add_node("deployment_rejected", _workflow_deployment_rejected_node)
+    graph.add_node("deployment", deployment_with_provider)
+
+    graph.add_edge(START, "select_tools")
+    graph.add_edge("select_tools", "data_quality")
+    graph.add_edge("select_tools", "data_drift")
+    graph.add_edge("select_tools", "feature_drift")
+    graph.add_edge("select_tools", "prediction_errors")
+    graph.add_edge(
+        ["data_quality", "data_drift", "feature_drift", "prediction_errors"],
+        "root_cause_analysis",
+    )
+    graph.add_conditional_edges(
+        "root_cause_analysis",
+        _workflow_route_after_root_cause,
+        {"no_action": "no_action", "approval": "human_approval"},
+    )
+    graph.add_edge("no_action", END)
+    graph.add_conditional_edges(
+        "human_approval",
+        _workflow_route_after_approval,
+        {"remediation": "remediation", "rejected": "remediation_rejected"},
+    )
+    graph.add_edge("remediation_rejected", END)
+    graph.add_conditional_edges(
+        "remediation",
+        _workflow_route_after_remediation,
+        {"deployment_approval": "deployment_approval", "end": END},
+    )
+    graph.add_conditional_edges(
+        "deployment_approval",
+        _workflow_route_after_deployment_approval,
+        {"deploy": "deployment", "rejected": "deployment_rejected"},
+    )
+    graph.add_edge("deployment", END)
+    graph.add_edge("deployment_rejected", END)
+
+    return graph.compile(checkpointer=checkpointer or MemorySaver())
