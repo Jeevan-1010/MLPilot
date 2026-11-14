@@ -88,10 +88,11 @@ def run_feature_drift_analysis(state):
     }
 
 
-def run_prediction_error_analysis(state):
+def run_prediction_error_analysis(state, model=None):
 
     current_data = pd.DataFrame(state["current_data"])
-    model = joblib.load("models/final_demand_forecasting_rf.joblib")
+    if model is None:
+        model = joblib.load("models/final_demand_forecasting_rf.joblib")
     features = state["features"]
 
     X = current_data[features]
