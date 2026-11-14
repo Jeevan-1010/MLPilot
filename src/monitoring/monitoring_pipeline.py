@@ -176,9 +176,13 @@ def prepare_investigator_data(data_path, model_schema=None):
         model_schema.get("rolling_windows", DEFAULT_ROLLING_WINDOWS)
         if model_schema else DEFAULT_ROLLING_WINDOWS
     )
+    default_features = [
+        "day_of_week", "month", "day_of_month", "week_of_year",
+        "lag_1", "lag_7", "lag_14", "rolling_mean_7", "rolling_mean_14",
+    ]
     feature_names = (
-        model_schema.get("feature_names", FEATURES)
-        if model_schema else FEATURES
+        model_schema.get("feature_names", default_features)
+        if model_schema else default_features
     )
     feature_df = create_features(
         daily_demand,
