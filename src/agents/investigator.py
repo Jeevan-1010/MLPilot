@@ -204,7 +204,7 @@ Return ONLY valid JSON in this exact structure:
 }}
 """
 
-    response = llm.invoke(prompt)
+    response = get_llm().invoke(prompt)
     content = str(response.content).strip()
 
     try:
