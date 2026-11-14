@@ -167,3 +167,32 @@ def run_monitoring(
 
 if __name__ == "__main__":
     run_monitoring()
+
+
+def prepare_investigator_data(data_path, model_schema=None):
+    """Return serializable reference/current windows for the Investigator."""
+    daily_demand = prepare_daily_demand(data_path)
+    rolling_windows = (
+        model_schema.get("rolling_windows", DEFAULT_ROLLING_WINDOWS)
+        if model_schema else DEFAULT_ROLLING_WINDOWS
+    )
+    feature_names = (
+        model_schema.get("feature_names", FEATURES)
+        if model_schema else FEATURES
+    )
+    feature_df = create_features(
+        daily_demand,
+        rolling_windows=rolling_windows,
+    )
+    missing = [name for name in feature_names if name not in feature_df.columns]
+    if missing:
+        raise ValueError(f"Missing Investigator features: {missing}")
+    if len(feature_df) < 60:
+        raise ValueError("At least 60 feature records are required for investigation.")
+    reference = feature_df.iloc[-60:-30]
+    current = feature_df.tail(30)
+    return (
+        reference.to_dict(orient="records"),
+        current.to_dict(orient="records"),
+        list(feature_names),
+    )
