@@ -161,6 +161,8 @@ def verify_and_correct_rolling_features(
 ) -> dict:
 
     try:
+        if feature_data is not None and not isinstance(feature_data, pd.DataFrame):
+            feature_data = pd.DataFrame(feature_data)
         _, daily_demand = prepare_data(data_path)
 
         return _verify_and_rebuild(
