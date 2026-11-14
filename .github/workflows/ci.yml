@@ -29,6 +29,9 @@ jobs:
       - name: Run test suite
         run: python -m pytest -v
 
+      - name: Validate Streamlit frontend syntax
+        run: python -m py_compile frontend/app.py
+
   docker:
     name: Build Docker Image
     needs: test
