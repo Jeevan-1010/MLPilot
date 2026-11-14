@@ -340,6 +340,31 @@ def api_run_monitoring() -> ApiResult:
         retries=0,
     )
 
+
+def api_start_investigation() -> ApiResult:
+    # Starting a cycle is intentionally user-triggered; never auto-run on page load.
+    return _request(
+        "POST", "/admin/investigator/start",
+        admin=True, read_timeout=MONITORING_READ_TIMEOUT, retries=0,
+    )
+
+
+def api_get_investigation(thread_id: str) -> ApiResult:
+    return _request(
+        "GET", f"/admin/investigator/{thread_id}",
+        admin=True, read_timeout=READ_TIMEOUT, retries=0,
+    )
+
+
+def api_approve_investigation(thread_id: str, approved: bool, feedback: str = "") -> ApiResult:
+    # No retry: resuming a checkpoint is a state-changing operation.
+    return _request(
+        "POST", f"/admin/investigator/{thread_id}/approve",
+        admin=True, json_body={"approved": approved, "feedback": feedback},
+        read_timeout=MONITORING_READ_TIMEOUT, retries=0,
+    )
+
+
 # =============================================================================
 # 3. ADMIN AUTHENTICATION (token stays server-side)
 # =============================================================================
@@ -1349,69 +1374,196 @@ def _render_investigation(record: dict, expanded: bool) -> None:
 def page_investigator() -> None:
     page_header(
         "AI Investigator",
-        "Root-cause analyses and recommendations produced by the investigator agent",
-        source_tags("GET /admin/remediation-history"),
+        "Run investigations, inspect findings and control remediation through explicit approvals",
+        source_tags(
+            "POST /admin/investigator/start",
+            "GET /admin/investigator/{thread_id}",
+            "POST /admin/investigator/{thread_id}/approve",
+        ),
     )
 
-    st.info(
-        "Investigations appear here only after they reach the remediation step, where the "
-        "backend stores the root cause, recommendation, human approval decision and outcome. "
-        "**Starting a new investigation from this dashboard requires backend support** - the "
-        "agent currently runs inside the backend codebase and the API has no endpoint to "
-        "trigger or approve a run."
+    if not render_admin_gate("AI Investigator controls"):
+        return
+
+    st.caption(
+        "Starting an investigation runs monitoring against the current production model. "
+        "Nothing is retrained or deployed unless you explicitly approve each separate stage."
     )
 
-    if not render_admin_gate("The investigation record view"):
-        return
-
-    controls = st.columns([1, 1, 3])
-    with controls[0]:
-        limit = st.number_input("Records to load", min_value=1, max_value=200, value=50, step=10)
-    with controls[1]:
-        display_n = st.number_input("Records to display", min_value=1, max_value=50, value=10, step=5)
-
-    with st.spinner(COLD_START_MESSAGE):
-        result = get_remediation_history(int(limit))
-
-    if not result.ok:
-        show_error(result, "Investigation records")
-        return
-
-    records = history_records(result)
-    total = (result.data or {}).get("total_records")
-
-    if not records:
-        st.info("No investigation records have been stored yet.")
-        return
-
-    df = history_frame(records)
-    cards_row(
-        [
-            ("Stored investigations", fmt_int(total), "Total in the database", "cyan"),
-            ("Loaded", fmt_int(len(records)), f"Latest {int(limit)} requested", "neutral"),
-            ("Approved", fmt_int((df["decision"] == "Approved").sum()), "By a human reviewer", "good"),
-            ("Rejected", fmt_int((df["decision"] == "Rejected").sum()), "By a human reviewer", "warn"),
-        ]
+    saved_thread = st.session_state.get("investigator_thread_id", "")
+    thread_input = st.text_input(
+        "Investigation thread ID",
+        value=saved_thread,
+        key="investigator_thread_id_input",
+        help="The ID is returned when an investigation starts. Paste an earlier ID here to resume viewing it.",
     )
+    col_start, col_load = st.columns(2)
+    with col_start:
+        if st.button("Start / find active investigation", type="primary"):
+            with st.spinner("Running monitoring and starting the Investigator..."):
+                result = api_start_investigation()
+            if result.ok:
+                data = result.data or {}
+                thread_id = data.get("thread_id") or st.session_state.get("investigator_thread_id")
+                if thread_id:
+                    st.session_state["investigator_thread_id"] = thread_id
+                    st.session_state["investigator_thread_id_input"] = thread_id
+                clear_api_cache()
+                if data.get("status") == "already_pending":
+                    st.info("An earlier investigation is already waiting for approval. Its thread has been loaded.")
+                elif data.get("status") == "already_starting":
+                    st.warning("An investigation is already starting. Refresh its status in a moment.")
+                else:
+                    st.success(f"Investigation started: {data.get('status', 'status unavailable')}")
+                if data.get("root_cause"):
+                    st.write("**Initial root cause:**", data.get("root_cause"))
+                if data.get("recommended_action"):
+                    st.write("**Recommended action:**", data.get("recommended_action"))
+                st.rerun()
+            else:
+                show_error(result, "Start investigation")
 
-    filters = st.columns(2)
-    with filters[0]:
-        actions = sorted(df["action"].unique().tolist())
-        chosen_actions = st.multiselect("Filter by action type", actions, default=actions)
-    with filters[1]:
-        decisions = sorted(df["decision"].unique().tolist())
-        chosen_decisions = st.multiselect("Filter by decision", decisions, default=decisions)
+    with col_load:
+        if st.button("Load thread / refresh status"):
+            if thread_input.strip():
+                st.session_state["investigator_thread_id"] = thread_input.strip()
+                st.rerun()
+            else:
+                st.warning("Enter an investigation thread ID first.")
 
-    keep = df["action"].isin(chosen_actions) & df["decision"].isin(chosen_decisions)
-    visible = [r for r, k in zip(records, keep.tolist()) if k]
-
-    if not visible:
-        st.info("No records match the selected filters.")
+    thread_id = st.session_state.get("investigator_thread_id") or thread_input.strip()
+    if not thread_id:
+        st.info("No investigation selected. Start a cycle or enter an existing thread ID.")
         return
 
-    st.caption(f"Showing {min(len(visible), int(display_n))} of {len(visible)} matching record(s), newest first.")
-    for index, record in enumerate(visible[: int(display_n)]):
-        _render_investigation(record, expanded=(index == 0))
+    st.divider()
+    st.markdown("### Investigation status")
+    with st.spinner("Loading the latest workflow state..."):
+        state_result = api_get_investigation(thread_id)
+
+    if not state_result.ok:
+        show_error(state_result, "Investigation status")
+        st.caption("If this is an older thread, verify that its ID is correct.")
+        return
+
+    data = state_result.data or {}
+    status = str(data.get("status") or "unknown")
+    pending_nodes = data.get("pending_nodes") or []
+    status_tone = (
+        "warn" if status.startswith("awaiting_")
+        else "good" if status in ("completed", "deployed")
+        else "bad" if status in ("failed", "rolled_back")
+        else "neutral"
+    )
+    st.markdown(pill(status.replace("_", " ").title(), status_tone), unsafe_allow_html=True)
+    st.code(thread_id)
+
+    report = data.get("monitoring_report") or {}
+    if report:
+        quality = report.get("data_quality") or {}
+        drift = report.get("data_drift") or {}
+        performance = report.get("model_performance") or {}
+        cards_row([
+            ("Monitoring", report.get("monitoring_status", "Unknown"), "Latest monitoring run", "good" if report.get("monitoring_status") == "HEALTHY" else "warn"),
+            ("Data quality", quality.get("quality_status", "Unknown"), f"{quality.get('total_records', 0)} records", "good" if quality.get("quality_status") == "HEALTHY" else "warn"),
+            ("Data drift", "Detected" if drift.get("drift_detected") else "Not detected", "Feature distribution", "warn" if drift.get("drift_detected") else "good"),
+            ("Performance", "Degraded" if performance.get("performance_degraded") else "Not degraded", "Reference vs current MAE", "warn" if performance.get("performance_degraded") else "good"),
+        ])
+        with st.expander("Monitoring report details"):
+            st.json(report)
+
+    st.markdown("### Investigator findings")
+    st.markdown("**Root cause**")
+    st.write(data.get("root_cause") or "Not available yet.")
+    st.markdown("**Recommended action**")
+    st.write(data.get("recommended_action") or "No recommendation recorded.")
+    action = data.get("remediation_action") or {}
+    if action:
+        st.markdown("**Proposed remediation parameters**")
+        st.json(action)
+
+    retraining = data.get("retraining_result") or {}
+    if retraining:
+        st.markdown("### Candidate evaluation")
+        st.write("Candidate model version:", retraining.get("model_version", "Not registered"))
+        production = retraining.get("production_metrics") or {}
+        candidate = retraining.get("candidate_metrics") or {}
+        if production or candidate:
+            metrics = ["MAE", "RMSE"]
+            show_table(pd.DataFrame({
+                "Metric": metrics,
+                "Production": [_num(production.get(k)) for k in metrics],
+                "Candidate": [_num(candidate.get(k)) for k in metrics],
+            }))
+        if retraining.get("evaluation_reason"):
+            st.caption(retraining.get("evaluation_reason"))
+
+    deployment = data.get("deployment_result") or {}
+    if deployment:
+        st.markdown("### Deployment result")
+        st.json(deployment)
+    if data.get("deployment_status"):
+        st.write("Deployment status:", data.get("deployment_status"))
+    if data.get("remediation_status"):
+        st.write("Remediation status:", data.get("remediation_status"))
+
+    awaiting_remediation = status == "awaiting_remediation_approval" or "human_approval" in pending_nodes
+    awaiting_deployment = status == "awaiting_deployment_approval" or "deployment_approval" in pending_nodes
+
+    if awaiting_remediation or awaiting_deployment:
+        stage = "remediation" if awaiting_remediation else "deployment"
+        st.divider()
+        st.markdown("### Human approval required")
+        if awaiting_remediation:
+            st.warning(
+                "Stage 1 — Remediation approval. Approving allows the whitelisted remediation "
+                "and candidate evaluation/registration. It does not deploy to production."
+            )
+        else:
+            pending_approval = data.get("pending_approval") or {}
+            st.warning(
+                "Stage 2 — Deployment approval. Approving promotes the evaluated candidate "
+                "to production. Rejecting leaves the current production model unchanged."
+            )
+            st.write("Candidate version:", pending_approval.get("candidate_version", "Unknown"))
+            candidate_metrics = pending_approval.get("candidate_metrics") or {}
+            production_metrics = pending_approval.get("production_metrics") or {}
+            if candidate_metrics or production_metrics:
+                show_table(pd.DataFrame({
+                    "Metric": ["MAE", "RMSE"],
+                    "Production": [_num(production_metrics.get("MAE")), _num(production_metrics.get("RMSE"))],
+                    "Candidate": [_num(candidate_metrics.get("MAE")), _num(candidate_metrics.get("RMSE"))],
+                }))
+
+        feedback = st.text_area(
+            "Approval / rejection feedback (optional)",
+            key=f"investigator_feedback_{stage}",
+        )
+        confirm = st.checkbox(
+            "I have reviewed the findings and understand the effect of this decision.",
+            key=f"investigator_confirm_{thread_id}_{stage}",
+        )
+        approve_col, reject_col = st.columns(2)
+        with approve_col:
+            if st.button("Approve " + stage, type="primary", disabled=not confirm, key=f"approve_{thread_id}_{stage}"):
+                with st.spinner("Resuming the approved workflow stage..."):
+                    decision = api_approve_investigation(thread_id, True, feedback)
+                if decision.ok:
+                    st.success(f"Approval recorded. New status: {(decision.data or {}).get('status', 'updated')}")
+                    st.rerun()
+                else:
+                    show_error(decision, "Approval")
+        with reject_col:
+            if st.button("Reject " + stage, disabled=not confirm, key=f"reject_{thread_id}_{stage}"):
+                with st.spinner("Recording rejection..."):
+                    decision = api_approve_investigation(thread_id, False, feedback)
+                if decision.ok:
+                    st.success(f"Rejection recorded. New status: {(decision.data or {}).get('status', 'updated')}")
+                    st.rerun()
+                else:
+                    show_error(decision, "Rejection")
+    else:
+        st.info("No approval is currently pending for this investigation.")
 
 
 # ---- Remediation History ----------------------------------------------------
