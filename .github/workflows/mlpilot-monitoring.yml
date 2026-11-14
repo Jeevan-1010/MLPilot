@@ -1,0 +1,34 @@
+name: MLPilot Scheduled Monitoring
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: mlpilot-monitoring
+  cancel-in-progress: false
+
+jobs:
+  monitor-and-investigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate deployment secrets
+        env:
+          API_URL: ${{ secrets.MLPILOT_API_URL }}
+          ADMIN_TOKEN: ${{ secrets.MLPILOT_ADMIN_TOKEN }}
+        run: |
+          test -n "$API_URL" || (echo "Missing MLPILOT_API_URL secret" && exit 1)
+          test -n "$ADMIN_TOKEN" || (echo "Missing MLPILOT_ADMIN_TOKEN secret" && exit 1)
+
+      - name: Run monitoring and start Investigator
+        env:
+          API_URL: ${{ secrets.MLPILOT_API_URL }}
+          ADMIN_TOKEN: ${{ secrets.MLPILOT_ADMIN_TOKEN }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$API_URL/admin/investigator/start" \
+            --header "X-Admin-Token: $ADMIN_TOKEN" \
+            --header "Content-Type: application/json" \
+            --max-time 840
