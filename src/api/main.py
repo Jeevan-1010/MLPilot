@@ -346,9 +346,22 @@ def startup_event():
             raise RuntimeError("LANGGRAPH_CHECKPOINT_DB_URI must be a PostgreSQL connection URL.")
         checkpoint_pool = ConnectionPool(
             conninfo=database_url,
-            kwargs={"autocommit": True, "prepare_threshold": 0},
+            # Neon may close idle SSL connections. Validate connections on
+            # checkout and recycle them before they become stale.
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": 0,
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 3,
+            },
             min_size=1,
             max_size=5,
+            max_lifetime=240,
+            max_idle=60,
+            reconnect_timeout=30,
+            check=ConnectionPool.check_connection,
             open=False,
         )
         checkpoint_pool.open()
