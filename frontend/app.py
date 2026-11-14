@@ -1465,6 +1465,32 @@ def _render_investigation(record: dict, expanded: bool) -> None:
             st.caption(f"Candidate registered: {'yes' if evaluation['registered'] else 'no'}")
 
 
+def _start_investigation_callback() -> None:
+    """Run before widgets are instantiated on the next Streamlit rerun."""
+    with st.spinner("Running monitoring and starting the Investigator..."):
+        result = api_start_investigation()
+
+    if result.ok:
+        data = result.data or {}
+        thread_id = data.get("thread_id") or st.session_state.get("investigator_thread_id")
+        if thread_id:
+            st.session_state["investigator_thread_id"] = thread_id
+            # This callback runs before the next script pass instantiates the widget.
+            st.session_state["investigator_thread_id_input"] = thread_id
+        clear_api_cache()
+        if data.get("status") == "already_pending":
+            notice = ("info", "An earlier investigation is already waiting for approval. Its thread has been loaded.")
+        elif data.get("status") == "already_starting":
+            notice = ("warning", "An investigation is already starting. Refresh its status in a moment.")
+        else:
+            notice = ("success", f"Investigation started: {data.get('status', 'status unavailable')}")
+        st.session_state["investigator_start_notice"] = notice
+        st.session_state["investigator_start_error"] = None
+    else:
+        st.session_state["investigator_start_error"] = result
+        st.session_state["investigator_start_notice"] = None
+
+
 def page_investigator() -> None:
     page_header(
         "AI Investigator",
@@ -1491,31 +1517,21 @@ def page_investigator() -> None:
         key="investigator_thread_id_input",
         help="The ID is returned when an investigation starts. Paste an earlier ID here to resume viewing it.",
     )
+    notice = st.session_state.pop("investigator_start_notice", None)
+    if notice:
+        level, message = notice
+        getattr(st, level)(message)
+    start_error = st.session_state.pop("investigator_start_error", None)
+    if start_error:
+        show_error(start_error, "Start investigation")
+
     col_start, col_load = st.columns(2)
     with col_start:
-        if st.button("Start / find active investigation", type="primary"):
-            with st.spinner("Running monitoring and starting the Investigator..."):
-                result = api_start_investigation()
-            if result.ok:
-                data = result.data or {}
-                thread_id = data.get("thread_id") or st.session_state.get("investigator_thread_id")
-                if thread_id:
-                    st.session_state["investigator_thread_id"] = thread_id
-                    st.session_state["investigator_thread_id_input"] = thread_id
-                clear_api_cache()
-                if data.get("status") == "already_pending":
-                    st.info("An earlier investigation is already waiting for approval. Its thread has been loaded.")
-                elif data.get("status") == "already_starting":
-                    st.warning("An investigation is already starting. Refresh its status in a moment.")
-                else:
-                    st.success(f"Investigation started: {data.get('status', 'status unavailable')}")
-                if data.get("root_cause"):
-                    st.write("**Initial root cause:**", data.get("root_cause"))
-                if data.get("recommended_action"):
-                    st.write("**Recommended action:**", data.get("recommended_action"))
-                st.rerun()
-            else:
-                show_error(result, "Start investigation")
+        st.button(
+            "Start / find active investigation",
+            type="primary",
+            on_click=_start_investigation_callback,
+        )
 
     with col_load:
         if st.button("Load thread / refresh status"):
