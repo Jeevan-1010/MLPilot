@@ -1,68 +1,84 @@
 # MLPilot
 
-**A model-agnostic MLOps platform with an AI Investigator Agent.**
+**An MLOps platform for automated model training, evaluation, monitoring, and human-approved deployment, with an AI Investigator Agent.**
 
-MLPilot demonstrates an end-to-end machine-learning operations workflow: train and evaluate models, track experiments, register and serve model versions, monitor data and prediction quality, investigate issues with an agentic workflow, and require human approval before remediation or production deployment.
+MLPilot is an end-to-end MLOps project built around a retail demand-forecasting use case. It uses a Random Forest model to demonstrate an ML workflow that includes training and retraining, evaluation, experiment tracking, model registration, API-based serving, monitoring, and controlled production deployment.
 
-Retail demand forecasting with a Random Forest model is the reference implementation. The orchestration is designed to be reusable with other ML models.
+When monitoring identifies an issue, a LangGraph-based AI Investigator coordinates diagnostic tools and recommends whether remediation is needed. Human approval is required at two stages: before candidate-model remediation/training proceeds, and before an evaluated candidate is deployed to production.
 
 ## Architecture
 
 ```text
-Data + Model
-    |
-    v
-Training & Evaluation -----> MLflow Tracking / Model Registry
-                                      |
-                                      v
-                               Model Deployment
-                                      |
-                                      v
-                                FastAPI Serving
-                                      |
-                                      v
-                           Scheduled / Manual Monitoring
-                                      |
-                           +----------+----------+
-                           |                     |
-                         Healthy              Alert / Drift
-                                                 |
-                                                 v
-                                        AI Investigator
-                                      (LangGraph workflow)
-                                                 |
-                                  Diagnostic tool selection
-                                                 |
-                                     Root-cause analysis
-                                                 |
-                                    Human approval #1
-                                                 |
-                                  Remediation / retraining
-                                                 |
-                                    Candidate evaluation
-                                                 |
-                                    Human approval #2
-                                                 |
-                                   Promote & reload model
-                                                 |
-                                  Health / version checks
-                                                 |
-                                    Rollback on failure
+Reference data + Random Forest model
+                 |
+                 v
+         Training / Retraining
+                 |
+                 v
+          Candidate evaluation
+                 |
+                 v
+        MLflow tracking / registry
+                 |
+                 v
+          Model deployment
+                 |
+                 v
+          FastAPI serving
+                 |
+                 v
+       Scheduled / manual monitoring
+                 |
+          +------+------+
+          |             |
+        Healthy      Alert / drift
+                        |
+                        v
+                AI Investigator
+              (LangGraph workflow)
+                        |
+                        v
+              Diagnostic tools
+                        |
+                        v
+               Root-cause decision
+                        |
+                        v
+               Human approval #1
+                        |
+                        v
+             Candidate remediation /
+                    retraining
+                        |
+                        v
+              Candidate evaluation
+                        |
+                        v
+               Human approval #2
+                        |
+                        v
+             Production deployment
+                        |
+                        v
+             Reload and verify model
+                        |
+                        v
+                Rollback on failure
 ```
 
-The Investigator coordinates data-quality, feature-drift, and prediction-error diagnostics. Drift alone is not treated as proof of model degradation: when data quality is healthy and measured model performance has not degraded, the workflow can record a no-action outcome instead of triggering unnecessary retraining.
+The Investigator coordinates data-quality, feature-drift, and prediction-error diagnostics. Drift alone is not treated as proof of model degradation: when data quality is healthy and measured model performance has not degraded, the workflow can record a no-action outcome rather than trigger unnecessary retraining.
 
 ## Key capabilities
 
-- **ML lifecycle:** training, time-series evaluation, experiment tracking, model versioning, and registry integration.
-- **Model serving:** FastAPI prediction endpoints with schema-aware model loading.
-- **Monitoring:** data-quality checks, feature-drift detection, and prediction-error monitoring.
-- **Agentic investigation:** LangGraph workflow for diagnostic tool selection, evidence gathering, root-cause decisions, and recommendations.
-- **Human-in-the-loop:** separate approval gates for remediation and production deployment.
-- **Deployment safeguards:** candidate checks, model reload and version verification, and rollback handling.
-- **Persistence:** PostgreSQL-backed LangGraph checkpoints in the deployed API configuration.
-- **Dashboard:** Streamlit interface for predictions, monitoring, investigation, remediation history, and model management.
-- **Automation:** GitHub Actions triggers monitoring/investigation on a six-hour schedule; it does not approve remediation or deployment.
+- **ML workflow:** Train and retrain the reference Random Forest demand-forecasting model, evaluate candidate results, and track experiments.
+- **Model registry:** Register and manage model versions through MLflow.
+- **Model serving:** Serve predictions through FastAPI and expose model health/version information.
+- **Monitoring:** Run data-quality checks, feature-drift detection, and prediction-error monitoring.
+- **AI Investigator:** Use a LangGraph workflow to select diagnostic tools, gather evidence, make a root-cause decision, and recommend next steps.
+- **Human approval gates:** Require approval before remediation/candidate training and a separate approval before production deployment.
+- **Deployment safeguards:** Check the candidate, promote the approved model, reload the serving API, verify the loaded version, and attempt rollback if validation fails.
+- **Dashboard:** Use the Streamlit interface for predictions, monitoring, investigation, remediation history, and model management.
+- **Scheduled monitoring:** Use GitHub Actions to trigger monitoring/investigation every six hours. The scheduled workflow cannot approve remediation or production deployment.
 
 ## Technology stack
 
@@ -78,11 +94,11 @@ The Investigator coordinates data-quality, feature-drift, and prediction-error d
 
 ## Evaluation results
 
-The following results combine controlled benchmarks, automated test fixtures, and one observed monitoring run. Test-fixture and simulated results are labelled explicitly; they are not production SLAs or guarantees.
+The results below combine controlled benchmarks, automated tests, synthetic fixtures, and one observed monitoring run. Test-fixture and simulated results are labelled explicitly; they are not production SLAs or guarantees.
 
-### API / inference performance benchmark
+### API and inference performance benchmark
 
-Serving configuration was optimized by changing the Random Forest `n_jobs` setting from `-1` to `1`. Before/after measurements were collected under the same benchmark setup.
+The serving configuration was optimized by changing the Random Forest `n_jobs` setting from `-1` to `1`. Before/after measurements were collected under the same benchmark setup.
 
 | Metric | Before | After | Change |
 |---|---:|---:|---:|
@@ -102,7 +118,7 @@ The offline monitoring evaluation uses labelled synthetic fixtures:
 
 - Data-drift tests cover stable and shifted data scenarios.
 - The data-quality test set classified **5/5 cases correctly**.
-- Drift tests enforce a recall threshold of at least 90% and a false-positive-rate ceiling of 20%; the exact drift confusion-matrix values are not claimed here.
+- Drift tests enforce a recall threshold of at least 90% and a false-positive-rate ceiling of 20%; exact drift confusion-matrix values are not claimed here.
 
 See [PR #11 — offline monitoring evaluation](https://github.com/Jeevan-1010/MLPilot/pull/11). These results describe the controlled test set, not production monitoring guarantees.
 
@@ -238,10 +254,10 @@ All `/admin/*` endpoints require the `X-Admin-Token` header. See [the API contra
 ## Human approval and deployment safety
 
 1. An investigation may conclude with no action; no candidate is trained in that case.
-2. If remediation is recommended, a human must approve before candidate training/registration.
+2. If remediation is recommended, a human must approve before candidate training/registration proceeds.
 3. A passing candidate requires a separate human approval before production deployment.
-4. Deployment checks that the production model has not changed since candidate evaluation.
-5. MLPilot promotes the candidate, reloads the serving API, and verifies the loaded model version.
+4. Before deployment, the workflow checks that the production model has not changed since candidate evaluation.
+5. After approval, MLPilot promotes the candidate, reloads the serving API, and verifies the loaded model version.
 6. If deployment validation fails, MLPilot attempts to restore the previous production alias and reload the previous model.
 
 The scheduled workflow can trigger monitoring and investigation, but it cannot bypass either approval gate.
@@ -276,8 +292,8 @@ notebooks/      Reference demand-forecasting development
 
 ## Scope and limitations
 
-- Retail demand forecasting is the reference model; the platform workflow is intended to support other model types through additional adapters.
-- Monitoring uses reference/recent data windows. Thresholds and window sizes should be calibrated for each dataset and model.
+- The current reference implementation uses a Random Forest model for retail demand forecasting. The README does not claim support for training or retraining across multiple algorithms.
+- Monitoring uses reference/recent data windows. Thresholds and window sizes should be calibrated for the dataset and model.
 - The deployed workflow has a process-local active-investigation guard. A multi-instance deployment needs a database-backed distributed lock to coordinate investigation starts.
 - Human approval is intentionally required before remediation and production deployment.
 - Offline tests, synthetic fixtures, mocked LLM/registry components, and local benchmarks do not replace broader live operational testing.
@@ -290,7 +306,7 @@ Try the deployed MLPilot dashboard:
 
 ## Project status
 
-I built MLPilot as an end-to-end, model-agnostic MLOps platform with a retail demand-forecasting model as its reference implementation. The production API and model are currently running well. The project includes the ML workflow, monitoring, LangGraph AI Investigator, two-stage human approval process, Streamlit dashboard, and scheduled monitoring/investigation workflow.
+I built MLPilot around a Random Forest-based retail demand-forecasting workflow. The production API and model are currently running. The project includes model training and retraining, evaluation, MLflow tracking and registry integration, monitoring, a LangGraph AI Investigator, a two-stage human approval process, the Streamlit dashboard, and scheduled monitoring/investigation.
 
 The evaluation and documentation updates are available in separate pull requests for review.
 
