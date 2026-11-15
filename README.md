@@ -88,8 +88,7 @@ The Investigator coordinates data-quality, feature-drift, and prediction-error d
 
 | Area | Technologies |
 |---|---|
-| Programming Language | Python |
-| Backend & API | FastAPI, Uvicorn |
+| Backend & API | Python, FastAPI, Uvicorn |
 | Machine Learning & Data Processing | scikit-learn, pandas, NumPy, SciPy |
 | AI Agents & Orchestration | LangGraph, LangChain, Groq |
 | Experiment Tracking & Model Registry | MLflow |
