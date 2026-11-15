@@ -2,11 +2,11 @@
 
 **A model-agnostic MLOps platform with an AI Investigator Agent.**
 
-MLPilot demonstrates an end-to-end machine-learning operations workflow using a retail demand-forecasting model as its reference implementation. The platform separates the MLOps orchestration from the subject model so the workflow can be extended to other models.
+MLPilot demonstrates an end-to-end machine-learning operations workflow: train and evaluate models, track experiments, register and serve model versions, monitor data and prediction quality, investigate issues with an agentic workflow, and require human approval before remediation or production deployment.
 
-## What it does
+Retail demand forecasting with a Random Forest model is the reference implementation. The orchestration is designed to be reusable with other ML models.
 
-MLPilot connects the following lifecycle:
+## Architecture
 
 ```text
 Data + Model
@@ -18,10 +18,10 @@ Training & Evaluation -----> MLflow Tracking / Model Registry
                                Model Deployment
                                       |
                                       v
-                                Model Serving
+                                FastAPI Serving
                                       |
                                       v
-                         Scheduled / Manual Monitoring
+                           Scheduled / Manual Monitoring
                                       |
                            +----------+----------+
                            |                     |
@@ -31,81 +31,141 @@ Training & Evaluation -----> MLflow Tracking / Model Registry
                                         AI Investigator
                                       (LangGraph workflow)
                                                  |
-                                   Diagnostic tool selection
+                                  Diagnostic tool selection
                                                  |
-                                  Root-cause analysis
+                                     Root-cause analysis
                                                  |
                                     Human approval #1
                                                  |
-                                  Remediation + retraining
+                                  Remediation / retraining
                                                  |
-                                   Candidate evaluation
+                                    Candidate evaluation
                                                  |
                                     Human approval #2
                                                  |
                                    Promote & reload model
                                                  |
-                                  Health/version verification
+                                  Health / version checks
                                                  |
                                     Rollback on failure
 ```
 
-The Investigator uses diagnostic tools for data quality, feature/data drift, and prediction-error analysis. It recommends a corrective action based on available evidence. Drift by itself is not treated as proof of model degradation: when data quality is healthy and measured performance has not degraded, the workflow records a no-action outcome instead of proposing retraining.
+The Investigator coordinates data-quality, feature-drift, and prediction-error diagnostics. Drift alone is not treated as proof of model degradation: when data quality is healthy and measured model performance has not degraded, the workflow can record a no-action outcome instead of triggering unnecessary retraining.
 
-## Main capabilities
+## Key capabilities
 
-- **Training and evaluation:** time-series cross-validation, MAE/RMSE comparison against the current production model, and candidate evaluation.
-- **Experiment tracking and registry:** MLflow runs, model versions, and a production model alias.
-- **Schema-aware serving:** FastAPI prediction endpoints load the registered production model and its feature schema.
-- **Monitoring:** data-quality checks, Kolmogorov–Smirnov feature-drift tests, and model-error monitoring.
-- **AI investigation:** LangGraph coordinates diagnostic tool selection, evidence-based root-cause analysis, and recommendations.
-- **Human-in-the-loop controls:** separate approval gates for remediation and production deployment.
-- **Deployment safeguards:** candidate version checks, serving health/version verification, and production-alias rollback if deployment validation fails.
-- **Persistence:** PostgreSQL-backed LangGraph checkpoints in the deployed API configuration and persisted remediation history.
-- **Dashboard:** Streamlit pages for overview, predictions, monitoring, AI investigation, remediation history, and model management.
-- **Automation:** GitHub Actions runs the monitoring/investigation trigger on a six-hour schedule. It does not approve remediation or deployment.
+- **ML lifecycle:** training, time-series evaluation, experiment tracking, model versioning, and registry integration.
+- **Model serving:** FastAPI prediction endpoints with schema-aware model loading.
+- **Monitoring:** data-quality checks, feature-drift detection, and prediction-error monitoring.
+- **Agentic investigation:** LangGraph workflow for diagnostic tool selection, evidence gathering, root-cause decisions, and recommendations.
+- **Human-in-the-loop:** separate approval gates for remediation and production deployment.
+- **Deployment safeguards:** candidate checks, model reload and version verification, and rollback handling.
+- **Persistence:** PostgreSQL-backed LangGraph checkpoints in the deployed API configuration.
+- **Dashboard:** Streamlit interface for predictions, monitoring, investigation, remediation history, and model management.
+- **Automation:** GitHub Actions triggers monitoring/investigation on a six-hour schedule; it does not approve remediation or deployment.
 
-## Technology
+## Technology stack
 
 | Area | Technologies |
 |---|---|
 | API and serving | Python, FastAPI, Uvicorn |
-| ML | scikit-learn, pandas, NumPy, SciPy |
+| Machine learning | scikit-learn, pandas, NumPy, SciPy |
 | Experiment tracking / registry | MLflow |
 | Agent orchestration | LangGraph, LangChain, Groq |
-| Persistence | PostgreSQL, Backblaze B2-compatible object storage |
+| Persistence / storage | PostgreSQL, Backblaze B2-compatible object storage |
 | Dashboard | Streamlit |
 | Packaging / CI | Docker, GitHub Actions |
 
-## Repository layout
+## Evaluation results
 
-```text
-src/
-  agents/       Investigator graph, diagnostics, remediation tools
-  api/          FastAPI endpoints and checkpoint integration
-  monitoring/   Data-quality, drift, and performance monitoring
-  pipeline/     Feature engineering, training, prediction, deployment
-  tracking/     MLflow configuration and tracking helpers
-frontend/       Streamlit dashboard
-tests/          Automated tests and benchmark scripts
-docs/           Frontend/backend API contract
-models/         Local baseline model artifact
-notebooks/      Demand-forecasting model development
-```
+The following results combine controlled benchmarks, automated test fixtures, and one observed monitoring run. Test-fixture and simulated results are labelled explicitly; they are not production SLAs or guarantees.
+
+### API / inference performance benchmark
+
+Serving configuration was optimized by changing the Random Forest `n_jobs` setting from `-1` to `1`. Before/after measurements were collected under the same benchmark setup.
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Sequential average latency | 45.81 ms | 27.07 ms | 40.9% lower |
+| Sequential P95 latency | 53.95 ms | 36.47 ms | 32.4% lower |
+| Concurrent average latency | 234.57 ms | 129.73 ms | 44.7% lower |
+| Concurrent P50 latency | 209.23 ms | 142.98 ms | 31.7% lower |
+| Concurrent P95 latency | 409.35 ms | 192.95 ms | 52.9% lower |
+| Concurrent throughput | 41.39 req/s | 74.15 req/s | 79.1% higher |
+| Failed requests | 0 | 0 | Maintained |
+
+These are benchmark-environment measurements, not a production latency or throughput SLA.
+
+### Monitoring evaluation
+
+The offline monitoring evaluation uses labelled synthetic fixtures:
+
+- Data-drift tests cover stable and shifted data scenarios.
+- The data-quality test set classified **5/5 cases correctly**.
+- Drift tests enforce a recall threshold of at least 90% and a false-positive-rate ceiling of 20%; the exact drift confusion-matrix values are not claimed here.
+
+See [PR #11 — offline monitoring evaluation](https://github.com/Jeevan-1010/MLPilot/pull/11). These results describe the controlled test set, not production monitoring guarantees.
+
+### Investigator and MLOps evaluation
+
+Results below were measured in the offline evaluation suite using deterministic test doubles and synthetic data where noted.
+
+| Evaluation | Result | Interpretation |
+|---|---:|---|
+| Investigator tool-selection contract | 5/5 (100%) | Deterministic LLM-double tests |
+| Root-cause decision contract | 3/3 (100%) | Decision-contract tests, not live LLM accuracy |
+| Full graph execution | 37.84 ms | Test graph with mocked components |
+| Approval stages | 2/2 completed | Both workflow gates exercised |
+| Training/evaluation pipeline | 618.17 ms average | Two synthetic-data runs |
+| Reproducibility | 2/2 identical metric outputs | Compared within 1e-12 tolerance |
+| Simulated deployment | 1/1 successful | Fake registry and mocked callbacks |
+| Simulated rollback | 1/1 successful | Previous version restored in test |
+| In-process API health checks | 20/20 successful | Test-client checks, not production uptime |
+| Failure recovery | HTTP 500 then HTTP 200 | Injected failure followed by successful request |
+
+Synthetic pipeline metrics:
+
+| Metric | Baseline | Candidate |
+|---|---:|---:|
+| MAE | 2.1810 | 0.7409 |
+| RMSE | 2.6360 | 1.0017 |
+
+The MAE/RMSE comparison is from a synthetic evaluation fixture and must not be interpreted as a measured improvement on live retail demand data. Deployment and rollback figures are simulated test scenarios, not production deployment statistics.
+
+See [PR #12 — Investigator, pipeline, and API reliability evaluations](https://github.com/Jeevan-1010/MLPilot/pull/12).
+
+### Example monitoring observation
+
+One monitoring run evaluated 30 records and reported:
+
+| Metric | Observed result |
+|---|---:|
+| Reference MAE | 8,646.35 |
+| Current MAE | 6,824.88 |
+| Error change | 21.07% lower |
+| Drift | Detected |
+| Performance degradation | Not detected |
+| Data quality | Healthy |
+
+For this observation, the Investigator recommended continued monitoring rather than unnecessary remediation. This is a single run, not evidence of general production model performance.
+
+### CI evaluation
+
+The latest evaluation PR #12 run completed **57/57 tests successfully**. The Python test/syntax job and Docker image build job passed. The monitoring evaluation is tracked separately in PR #11. Both evaluation PRs are open and have not been merged; their results are documented here for review.
 
 ## Run locally
 
-### 1. Requirements
+### Prerequisites
 
 - Python 3.12
 - Git
-- A configured MLflow tracking backend and artifact store
-- A registered model named `MLPilot-Demand-Forecasting` with a `production` alias
-- The subject-model dataset at `data/prepwise_cleaned_dataset (3).csv`
+- An MLflow tracking backend and artifact store
+- A registered reference model named `MLPilot-Demand-Forecasting` with a `production` alias for the full serving workflow
+- The reference dataset at `data/prepwise_cleaned_dataset (3).csv`
 
-The dataset is not included in this repository. Supply a dataset you are authorized to use and ensure it follows the columns expected by the demand-forecasting preparation pipeline.
+The dataset is not included in this repository. Use data you are authorized to access and ensure it contains the fields expected by the reference-model preparation pipeline.
 
-### 2. Install dependencies
+### Install
 
 ```bash
 git clone https://github.com/Jeevan-1010/MLPilot.git
@@ -121,25 +181,25 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment
+### Configure environment
 
-Create a local `.env` file. Keep credentials out of Git and never commit this file.
+Create a local `.env` file. Never commit credentials or share secret values.
 
 | Variable | Purpose |
 |---|---|
 | `MLFLOW_TRACKING_URI` | MLflow tracking server / registry URI |
 | `MLFLOW_S3_ENDPOINT_URL` | S3-compatible artifact endpoint when using B2 |
-| `MLFLOW_ARTIFACTS_BUCKET` | Object-storage bucket used for monitoring data |
+| `MLFLOW_ARTIFACTS_BUCKET` | Object-storage bucket for monitoring data |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Object-storage credentials |
 | `AWS_DEFAULT_REGION` | Object-storage region |
-| `GROQ_API_KEY` | Groq API key for LLM-based investigation |
+| `GROQ_API_KEY` | Groq API key for LLM investigation |
 | `LANGGRAPH_CHECKPOINT_DB_URI` | PostgreSQL URI for persistent LangGraph checkpoints |
-| `MLPILOT_ADMIN_TOKEN` | Secret required by all `/admin/*` API endpoints |
-| `MLPILOT_API_URL` | API base URL used by deployment verification and automation |
+| `MLPILOT_ADMIN_TOKEN` | Secret required by `/admin/*` API endpoints |
+| `MLPILOT_API_URL` | API base URL used by deployment verification / automation |
 
-Use a PostgreSQL URI for `LANGGRAPH_CHECKPOINT_DB_URI`. Keep it separate from `MLFLOW_TRACKING_URI`. The API can use an in-memory checkpoint saver for local development when the PostgreSQL variable is omitted; that mode does not persist investigations across process restarts.
+Keep `LANGGRAPH_CHECKPOINT_DB_URI` separate from `MLFLOW_TRACKING_URI`. Local development can use in-memory checkpoints when the PostgreSQL variable is omitted; investigations will not persist across process restarts in that mode.
 
-### 4. Start the API
+### Start the API
 
 ```bash
 uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
@@ -147,7 +207,7 @@ uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 
 API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### 5. Start the dashboard
+### Start the dashboard
 
 In a second terminal:
 
@@ -156,7 +216,7 @@ pip install -r frontend/requirements.txt
 streamlit run frontend/app.py
 ```
 
-Configure the dashboard's API base URL and admin authentication values through its server-side environment/secrets configuration. Do not put the admin token in browser-side code or commit credentials.
+Configure the dashboard API base URL and admin authentication through server-side environment variables or Streamlit secrets. Do not expose the admin token in browser-side code.
 
 ## API overview
 
@@ -169,26 +229,26 @@ Configure the dashboard's API base URL and admin authentication values through i
 | `POST` | `/admin/monitoring/run` | Run monitoring |
 | `POST` | `/admin/investigator/start` | Start or find an investigation |
 | `GET` | `/admin/investigator/{thread_id}` | Retrieve investigation state |
-| `POST` | `/admin/investigator/{thread_id}/approve` | Approve/reject the pending stage |
+| `POST` | `/admin/investigator/{thread_id}/approve` | Approve or reject the pending stage |
 | `POST` | `/admin/reload-model` | Reload the production model |
 | `GET` | `/admin/remediation-history` | Retrieve remediation history |
 
-All `/admin/*` endpoints require the `X-Admin-Token` header. See [the API contract](docs/FRONTEND_API_CONTRACT.md) for request/response behavior and approval-stage details.
+All `/admin/*` endpoints require the `X-Admin-Token` header. See [the API contract](docs/FRONTEND_API_CONTRACT.md) for request/response details and approval-stage behavior.
 
-## Safety and deployment behavior
+## Human approval and deployment safety
 
-1. An investigation can finish with no action; no candidate is trained in that case.
-2. If a corrective action is recommended, a human must approve remediation before candidate training/registration.
-3. A passing candidate waits for a separate human deployment approval.
-4. Deployment checks that production has not changed since candidate evaluation.
-5. The production alias is promoted, the serving API is reloaded, and the loaded model version is verified.
+1. An investigation may conclude with no action; no candidate is trained in that case.
+2. If remediation is recommended, a human must approve before candidate training/registration.
+3. A passing candidate requires a separate human approval before production deployment.
+4. Deployment checks that the production model has not changed since candidate evaluation.
+5. MLPilot promotes the candidate, reloads the serving API, and verifies the loaded model version.
 6. If deployment validation fails, MLPilot attempts to restore the previous production alias and reload the previous model.
 
-The scheduled workflow only starts the investigation. It never bypasses either approval gate.
+The scheduled workflow can trigger monitoring and investigation, but it cannot bypass either approval gate.
 
-## Tests and CI
+## Tests
 
-Run the automated test suite:
+Run the repository test suite and syntax checks:
 
 ```bash
 python -m pytest -v
@@ -196,18 +256,32 @@ python -m compileall -q src
 python -m py_compile frontend/app.py
 ```
 
-GitHub Actions runs the test suite, frontend syntax validation, backend syntax checks, and Docker image build on pushes/pull requests to `main`.
+GitHub Actions validates tests, backend/frontend syntax, and the Docker image build. Benchmark scripts in `tests/` can be run in a controlled environment; record the environment and workload when comparing results.
 
-Benchmark scripts are available under `tests/` for API, batch, concurrent-request, and model-inference measurements. Run them against a controlled environment before publishing performance figures; do not treat local benchmark results as production SLAs.
+## Repository layout
 
-## Current scope and limitations
+```text
+src/
+  agents/       Investigator graph, diagnostics, remediation tools
+  api/          FastAPI endpoints and checkpoint integration
+  monitoring/   Data-quality, drift, and performance monitoring
+  pipeline/     Feature engineering, training, prediction, deployment
+  tracking/     MLflow configuration and tracking helpers
+frontend/       Streamlit dashboard
+tests/          Automated tests and benchmark scripts
+docs/           Frontend/backend API contract
+models/         Local baseline model artifact
+notebooks/      Reference demand-forecasting development
+```
 
-- The included subject-model implementation is retail demand forecasting; the MLOps workflow is designed to be extended to other model types.
-- Monitoring currently compares fixed recent/reference data windows. Thresholds and window sizes are configurable in code and should be calibrated for a new dataset/model.
-- The deployed workflow uses a process-local active-investigation guard. PostgreSQL checkpoints persist workflow state, but a multi-instance deployment needs a database-backed distributed lock to coordinate starts across instances.
+## Scope and limitations
+
+- Retail demand forecasting is the reference model; the platform workflow is intended to support other model types through additional adapters.
+- Monitoring uses reference/recent data windows. Thresholds and window sizes should be calibrated for each dataset and model.
+- The deployed workflow has a process-local active-investigation guard. A multi-instance deployment needs a database-backed distributed lock to coordinate investigation starts.
 - Human approval is intentionally required before remediation and production deployment.
-- A successful CI run validates tests, syntax, and the Docker build; it does not replace a live end-to-end deployment/rollback exercise.
+- Offline tests, synthetic fixtures, mocked LLM/registry components, and local benchmarks do not replace broader live operational testing.
 
 ## Project status
 
-Active project. The demand-forecasting reference implementation, monitoring pipeline, LangGraph Investigator, approval workflow, Streamlit dashboard, CI checks, and scheduled investigation trigger are implemented. Further model adapters, multi-instance coordination, and broader live operational testing remain future work.
+The project owner has confirmed that the production API and model are running well. The reference-model workflow, monitoring, LangGraph Investigator, two-stage approval flow, Streamlit dashboard, and scheduled investigation trigger are implemented. Evaluation/documentation PRs are being reviewed separately; no pull request is merged by this documentation update.
