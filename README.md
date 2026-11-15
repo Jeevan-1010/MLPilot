@@ -305,11 +305,11 @@ notebooks/      Reference demand-forecasting development
 - Human approval is intentionally required before remediation and production deployment.
 - Offline tests, synthetic fixtures, mocked LLM/registry components, and local benchmarks do not replace broader live operational testing.
 
-## Live demo
+## Live Project
 
 Try the deployed MLPilot dashboard:
 
-**[Open MLPilot Dashboard](https://mlpilot-dashboard.onrender.com/)**
+https://mlpilot-dashboard.onrender.com/
 
 ## Project status
 
