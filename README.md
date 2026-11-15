@@ -1,10 +1,14 @@
 # MLPilot
 
-**An MLOps platform for automated model training, evaluation, monitoring, and human-approved deployment, with an AI Investigator Agent.**
+**An MLOps platform for automated model training, evaluation, monitoring, and human-approved deployment.**
 
-MLPilot is an end-to-end MLOps project built around a retail demand-forecasting use case. It uses a Random Forest model to demonstrate an ML workflow that includes training and retraining, evaluation, experiment tracking, model registration, API-based serving, monitoring, and controlled production deployment.
+**Core components:** AI Investigator Agent · Data Quality & Drift Monitoring · Model Performance Analysis · Automated Remediation & Retraining · Candidate Evaluation & MLflow Registry · Approval-Gated Deployment & Rollback.
 
-When monitoring identifies an issue, a LangGraph-based AI Investigator coordinates diagnostic tools and recommends whether remediation is needed. Human approval is required at two stages: before candidate-model remediation/training proceeds, and before an evaluated candidate is deployed to production.
+MLPilot is an end-to-end MLOps project built around a retail demand-forecasting use case using a Random Forest model. It brings together the complete workflow: training and retraining, candidate evaluation, experiment tracking, model registration, FastAPI serving, continuous monitoring, investigation, and controlled production deployment.
+
+The LangGraph-based AI Investigator coordinates specialized diagnostic components for data quality, feature drift, data drift, and prediction-error analysis. Based on the evidence, the workflow can recommend a corrective action, run the approved remediation and retraining pipeline, evaluate and register a candidate model, and then wait for a separate human approval before production deployment. Deployment includes model reload and version verification, with rollback handling if validation fails.
+
+The monitoring, diagnostic, remediation, training, and deployment components are distinct parts of the MLOps workflow; they are not presented as separate autonomous AI agents.
 
 ## Architecture
 
