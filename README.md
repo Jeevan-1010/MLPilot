@@ -1,6 +1,6 @@
 # MLPilot
 
-**An AI-Agent-Powered MLOps Platform for model monitoring, investigation, and human-approved deployment.**
+**An end-to-end MLOps platform for model training, monitoring, investigation, and human-approved deployment — supported by a LangGraph-powered AI Investigator Agent.**
 
 **Core components:** AI Investigator Agent · Data Quality & Drift Monitoring · Model Performance Analysis · Automated Remediation & Retraining · Candidate Evaluation & MLflow Registry · Approval-Gated Deployment & Rollback.
 
