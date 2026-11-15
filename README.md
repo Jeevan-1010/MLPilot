@@ -84,18 +84,20 @@ The Investigator coordinates data-quality, feature-drift, and prediction-error d
 - **Dashboard:** Use the Streamlit interface for predictions, monitoring, investigation, remediation history, and model management.
 - **Scheduled monitoring:** Use GitHub Actions to trigger monitoring/investigation every six hours. The scheduled workflow cannot approve remediation or production deployment.
 
-## Technology stack
+## Technology Stack
 
 | Area | Technologies |
 |---|---|
-| API and serving | Python, FastAPI, Uvicorn |
-| Machine learning | scikit-learn, pandas, NumPy, SciPy |
-| Experiment tracking / registry | MLflow |
-| Agent orchestration | LangGraph, LangChain, Groq |
-| Database / object storage | Neon PostgreSQL (LangGraph checkpoint persistence), Backblaze B2-compatible object storage |
-| Dashboard | Streamlit |
-| Packaging / CI | Docker, GitHub Actions |
-| Hosting / deployment | Render (FastAPI backend and Streamlit dashboard) |
+| Programming Language | Python |
+| Backend & API | FastAPI, Uvicorn |
+| Machine Learning & Data Processing | scikit-learn, pandas, NumPy, SciPy |
+| AI Agents & Orchestration | LangGraph, LangChain, Groq |
+| Experiment Tracking & Model Registry | MLflow |
+| Database & Checkpoint Persistence | Neon PostgreSQL |
+| Object Storage | Backblaze B2 |
+| Dashboard & UI | Streamlit |
+| Containerization & CI/CD | Docker, GitHub Actions |
+| Cloud Hosting & Deployment | Render |
 
 ## Evaluation results
 
