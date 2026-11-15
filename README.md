@@ -282,6 +282,18 @@ notebooks/      Reference demand-forecasting development
 - Human approval is intentionally required before remediation and production deployment.
 - Offline tests, synthetic fixtures, mocked LLM/registry components, and local benchmarks do not replace broader live operational testing.
 
+## Live demo
+
+Try the deployed MLPilot dashboard:
+
+**[Open MLPilot Dashboard](https://mlpilot-dashboard.onrender.com/)**
+
 ## Project status
 
-The project owner has confirmed that the production API and model are running well. The reference-model workflow, monitoring, LangGraph Investigator, two-stage approval flow, Streamlit dashboard, and scheduled investigation trigger are implemented. Evaluation/documentation PRs are being reviewed separately; no pull request is merged by this documentation update.
+I built MLPilot as an end-to-end, model-agnostic MLOps platform with a retail demand-forecasting model as its reference implementation. The production API and model are currently running well. The project includes the ML workflow, monitoring, LangGraph AI Investigator, two-stage human approval process, Streamlit dashboard, and scheduled monitoring/investigation workflow.
+
+The evaluation and documentation updates are available in separate pull requests for review.
+
+## Author
+
+**Jeevan M**
