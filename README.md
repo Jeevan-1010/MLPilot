@@ -1,8 +1,8 @@
 # MLPilot
 
-**An end-to-end MLOps platform for model training, monitoring, investigation, and human-approved deployment — supported by a LangGraph-powered AI Investigator Agent.**
+**An end-to-end MLOps platform for model training, monitoring, investigation, and human-approved deployment — supported by AI agents.**
 
-**Core components:** AI Investigator Agent · Data Quality & Drift Monitoring · Model Performance Analysis · Automated Remediation & Retraining · Candidate Evaluation & MLflow Registry · Approval-Gated Deployment & Rollback.
+**Core components:** AI Agents · Data Quality & Drift Monitoring · Model Performance Analysis · Automated Remediation & Retraining · Candidate Evaluation & MLflow Registry · Approval-Gated Deployment & Rollback.
 
 MLPilot is an end-to-end, AI-agent-powered MLOps project built around a retail demand-forecasting use case using a Random Forest model. It brings together training and retraining, candidate evaluation, experiment tracking, model registration, FastAPI serving, continuous monitoring, investigation, and controlled production deployment. At its center is a LangGraph-based AI Investigator that coordinates diagnostic tools, evaluates evidence, and guides the workflow toward an appropriate next step.
 
