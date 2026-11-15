@@ -92,9 +92,10 @@ The Investigator coordinates data-quality, feature-drift, and prediction-error d
 | Machine learning | scikit-learn, pandas, NumPy, SciPy |
 | Experiment tracking / registry | MLflow |
 | Agent orchestration | LangGraph, LangChain, Groq |
-| Persistence / storage | PostgreSQL, Backblaze B2-compatible object storage |
+| Database / object storage | Neon PostgreSQL (LangGraph checkpoint persistence), Backblaze B2-compatible object storage |
 | Dashboard | Streamlit |
 | Packaging / CI | Docker, GitHub Actions |
+| Hosting / deployment | Render (FastAPI backend and Streamlit dashboard) |
 
 ## Evaluation results
 
