@@ -1,14 +1,14 @@
 # MLPilot
 
-**An MLOps platform for automated model training, evaluation, monitoring, and human-approved deployment.**
+**An AI-Agent-Powered MLOps Platform for model monitoring, investigation, and human-approved deployment.**
 
 **Core components:** AI Investigator Agent · Data Quality & Drift Monitoring · Model Performance Analysis · Automated Remediation & Retraining · Candidate Evaluation & MLflow Registry · Approval-Gated Deployment & Rollback.
 
-MLPilot is an end-to-end MLOps project built around a retail demand-forecasting use case using a Random Forest model. It brings together the complete workflow: training and retraining, candidate evaluation, experiment tracking, model registration, FastAPI serving, continuous monitoring, investigation, and controlled production deployment.
+MLPilot is an end-to-end, AI-agent-powered MLOps project built around a retail demand-forecasting use case using a Random Forest model. It brings together training and retraining, candidate evaluation, experiment tracking, model registration, FastAPI serving, continuous monitoring, investigation, and controlled production deployment. At its center is a LangGraph-based AI Investigator that coordinates diagnostic tools, evaluates evidence, and guides the workflow toward an appropriate next step.
 
-The LangGraph-based AI Investigator coordinates specialized diagnostic components for data quality, feature drift, data drift, and prediction-error analysis. Based on the evidence, the workflow can recommend a corrective action, run the approved remediation and retraining pipeline, evaluate and register a candidate model, and then wait for a separate human approval before production deployment. Deployment includes model reload and version verification, with rollback handling if validation fails.
+The AI Investigator coordinates specialized diagnostic components for data quality, feature drift, data drift, and prediction-error analysis. Based on the evidence, it can recommend a corrective action, initiate the approved remediation and retraining pipeline, evaluate and register a candidate model, and wait for a separate human approval before production deployment. Deployment includes model reload and version verification, with rollback handling if validation fails.
 
-The monitoring, diagnostic, remediation, training, and deployment components are distinct parts of the MLOps workflow; they are not presented as separate autonomous AI agents.
+The AI Investigator is the coordinating agent; monitoring, diagnostic, remediation, training, and deployment are specialized components and tools it orchestrates.
 
 ## Architecture
 
